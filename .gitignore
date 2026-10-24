@@ -1,0 +1,17 @@
+# Compiled binaries and build folders
+*.hex
+*.elf
+*.bin
+build/
+output/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor & IDE configs
+.vscode/
+.idea/
+*.swp
+*.bak
