@@ -184,6 +184,7 @@ unsigned long lastOledDraw = 0;
 // IR Sensor State
 bool lastIrDetected = false;
 unsigned long irTriggerTime = 0;
+unsigned long irDetectStartTime = 0;
 
 // ----------------------------------------------------------------------------
 // 5. HIGH-SPEED SH1106 CONTROLLER (400 kHz Fast-Mode!)
@@ -811,12 +812,21 @@ void updateStoryChoreography() {
 // ----------------------------------------------------------------------------
 
 void checkIrSensor() {
-  // Standard 3-pin IR obstacle sensors output LOW when an object or hand is detected
-  bool isDetected = (digitalRead(IR_SENSOR_PIN) == LOW);
+  bool rawReading = (digitalRead(IR_SENSOR_PIN) == LOW);
+  unsigned long now = millis();
+
+  // 50ms Debounce Filter: Prevents rapid flickering from room light noise
+  if (rawReading) {
+    if (irDetectStartTime == 0) irDetectStartTime = now;
+  } else {
+    irDetectStartTime = 0;
+  }
+
+  bool isDetected = (irDetectStartTime > 0 && (now - irDetectStartTime >= 50));
 
   if (isDetected && !lastIrDetected) {
     lastIrDetected = true;
-    irTriggerTime = millis();
+    irTriggerTime = now;
     currentFace = FACE_HAIII;        // 📺 DISPLAY "HAIII! I SEE YOU!" SCREEN!
     targetServoAngle = ARM_UP_ANGLE;  // Both arms swing UP in excitement! 🙌
     armSpeed = 3.2;
@@ -824,14 +834,14 @@ void checkIrSensor() {
   }
   else if (!isDetected && lastIrDetected) {
     // Hold "HAIII!" greeting for at least 2 seconds so it is clearly readable
-    if (millis() - irTriggerTime >= 2000) {
+    if (now - irTriggerTime >= 2000) {
       lastIrDetected = false;
       currentFace = FACE_ORGANIC_ROBOT;
       currentMood = MOOD_NORMAL;
       targetServoAngle = ARM_DOWN_ANGLE;
       armSpeed = 1.6;
       storyStep = 0;
-      storyStepTimer = millis();
+      storyStepTimer = now;
       Serial.println(F("👋 [IR SENSOR]: Hand cleared. Resuming normal story loop."));
     }
   }
