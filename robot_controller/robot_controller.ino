@@ -180,6 +180,10 @@ unsigned long introStartTime = 0;
 unsigned long lastArmUpdateTime = 0;
 unsigned long lastOledDraw = 0;
 
+// IR Sensor State
+bool lastIrDetected = false;
+unsigned long irTriggerTime = 0;
+
 // ----------------------------------------------------------------------------
 // 5. HIGH-SPEED SH1106 CONTROLLER (400 kHz Fast-Mode!)
 // ----------------------------------------------------------------------------
@@ -733,9 +737,6 @@ void updateStoryChoreography() {
 // ----------------------------------------------------------------------------
 // 10. IR SENSOR (HAND DETECTION & GREETING)
 // ----------------------------------------------------------------------------
-
-bool lastIrDetected = false;
-unsigned long irTriggerTime = 0;
 
 void checkIrSensor() {
   // Standard 3-pin IR obstacle sensors output LOW when an object or hand is detected
