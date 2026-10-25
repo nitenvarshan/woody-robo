@@ -29,6 +29,8 @@
 #define LEFT_SERVO_PIN  9
 #define RIGHT_SERVO_PIN 10
 #define LED_PIN         13
+#define IR_SENSOR_PIN   2   // Signal OUT pin from IR Obstacle Sensor
+#define IR_POWER_PIN    4   // Convenient 5V VCC power pin for IR sensor (if 5V header is full)
 
 Servo leftServo;
 Servo rightServo;
@@ -667,6 +669,7 @@ void updateStoryChoreography() {
   }
 
   if (!autoDanceMode || calibrationMode || isStopped) return;
+  if (lastIrDetected) return; // Keep Woody in interactive greeting while hand is present!
 
   // The Continuous Choreographed Story:
   // Step 0: Glance Left & Blink naturally (2.6s)
@@ -727,7 +730,41 @@ void updateStoryChoreography() {
 }
 
 // ----------------------------------------------------------------------------
-// 10. SERIAL COMMAND CENTER
+// 10. IR SENSOR (HAND DETECTION & GREETING)
+// ----------------------------------------------------------------------------
+
+bool lastIrDetected = false;
+unsigned long irTriggerTime = 0;
+
+void checkIrSensor() {
+  // Standard 3-pin IR obstacle sensors output LOW when an object or hand is detected
+  bool isDetected = (digitalRead(IR_SENSOR_PIN) == LOW);
+
+  if (isDetected && !lastIrDetected) {
+    lastIrDetected = true;
+    irTriggerTime = millis();
+    currentFace = FACE_ORGANIC_ROBOT;
+    currentMood = MOOD_HEART;        // HUGE Glowing Beating Hearts! ❤️❤️
+    targetServoAngle = ARM_UP_ANGLE;  // Swing both arms UP in excitement! 🙌
+    armSpeed = 3.2;
+    Serial.println(F("\n👋 [IR SENSOR]: Hand detected! Woody says Hello with BIG HEARTS! ❤️🙌"));
+  }
+  else if (!isDetected && lastIrDetected) {
+    // Hold greeting for at least 1.5 seconds so it feels natural
+    if (millis() - irTriggerTime >= 1500) {
+      lastIrDetected = false;
+      currentMood = MOOD_NORMAL;
+      targetServoAngle = ARM_DOWN_ANGLE;
+      armSpeed = 1.6;
+      storyStep = 0;
+      storyStepTimer = millis();
+      Serial.println(F("👋 [IR SENSOR]: Hand cleared. Resuming normal story loop."));
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 11. SERIAL COMMAND CENTER
 // ----------------------------------------------------------------------------
 
 void printCommandMenu() {
@@ -739,6 +776,8 @@ void printCommandMenu() {
   Serial.println(F("    2. Playful One-Eye Wink 😉"));
   Serial.println(F("    3. HUGE GLOWING HEARTS in BOTH Eyes ❤️❤️ + Arms UP! 🙌"));
   Serial.println(F("    (Loops continuously!)"));
+  Serial.println(F(""));
+  Serial.println(F("  [IR SENSOR DETECT]: Wave hand in front -> Instant HUGE Hearts & Arms UP! 🙌"));
   Serial.println(F(""));
   Serial.println(F("  [COMMANDS]"));
   Serial.println(F("    'T' or 'INTRO'   -> Replay 'HELLO, I AM WOODY BATCH 4' Screen"));
@@ -890,14 +929,20 @@ void setup() {
 
   lastBlinkTime = millis();
   targetPupilX = -6;
+
+  // 4. Initialize IR Sensor (Pin 2 = Signal, Pin 4 = 5V Power)
+  pinMode(IR_POWER_PIN, OUTPUT);
+  digitalWrite(IR_POWER_PIN, HIGH); // Supplies pure 5V to the IR sensor!
+  pinMode(IR_SENSOR_PIN, INPUT_PULLUP);
 }
 
 void loop() {
   // 1. Heartbeat LED
   digitalWrite(LED_PIN, (millis() / 500) % 2);
 
-  // 2. Check Serial Commands
+  // 2. Check Serial Commands & IR Sensor
   checkSerialCommands();
+  checkIrSensor();
 
   // 3. Update Organic Eyeballs & Saccades
   updateEyePhysics();
