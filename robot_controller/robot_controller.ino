@@ -30,7 +30,8 @@
 #define RIGHT_SERVO_PIN 10
 #define LED_PIN         13
 #define IR_SENSOR_PIN   2   // Signal OUT pin from IR Obstacle Sensor
-#define IR_POWER_PIN    4   // Convenient 5V VCC power pin for IR sensor (if 5V header is full)
+#define IR_GND_PIN      3   // Pure 0V Ground pin for IR sensor (so you don't need to share GND!)
+#define IR_POWER_PIN    4   // Pure 5V VCC power pin for IR sensor (if 5V headers are full)
 
 Servo leftServo;
 Servo rightServo;
@@ -930,9 +931,11 @@ void setup() {
   lastBlinkTime = millis();
   targetPupilX = -6;
 
-  // 4. Initialize IR Sensor (Pin 2 = Signal, Pin 4 = 5V Power)
+  // 4. Initialize IR Sensor (Pin 2 = Signal, Pin 3 = Ground, Pin 4 = 5V Power)
+  pinMode(IR_GND_PIN, OUTPUT);
+  digitalWrite(IR_GND_PIN, LOW);    // Pure 0V Ground for the IR sensor!
   pinMode(IR_POWER_PIN, OUTPUT);
-  digitalWrite(IR_POWER_PIN, HIGH); // Supplies pure 5V to the IR sensor!
+  digitalWrite(IR_POWER_PIN, HIGH); // Pure 5V Power for the IR sensor!
   pinMode(IR_SENSOR_PIN, INPUT_PULLUP);
 }
 
