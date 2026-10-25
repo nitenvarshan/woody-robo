@@ -1,7 +1,7 @@
 /*
  * ============================================================================
- *   SUPER COOL WOODEN ROBOT COMPANION (DUAL SERVO VERSION!)
- *   Dual-Arm Synchronized Robot + Expressive OLED Face + Welcome Smiley
+ *   MINECRAFT CREEPER ROBOT COMPANION! 🟩💥
+ *   Dual-Arm Synchronized Servos + Expressive Creeper OLED Face
  * ============================================================================
  *   Board: Arduino Uno R3 (Direct Pin Connections - No Breadboard Needed!)
  *   Display: 1.3" or 0.96" I2C OLED (128x64)
@@ -17,55 +17,46 @@
 #include <Servo.h>
 
 // ----------------------------------------------------------------------------
-// 1. PIN & DISPLAY SETUP
+// 1. PIN & DISPLAY CONFIGURATION
 // ----------------------------------------------------------------------------
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET    -1
 
-// Most OLEDs use 0x3C (if not, try 0x3D)
-#define OLED_I2C_ADDRESS 0x3C
-
-#define LEFT_SERVO_PIN  9   // Servo 1 (Left Arm)
-#define RIGHT_SERVO_PIN 10  // Servo 2 (Right Arm)
+#define LEFT_SERVO_PIN  9   // Left Arm Servo
+#define RIGHT_SERVO_PIN 10  // Right Arm Servo
+#define LED_PIN         13  // Built-in "L" LED
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 Servo leftServo;
 Servo rightServo;
 
+bool oledFound = false;
+
 // ----------------------------------------------------------------------------
-// 2. DUAL ARM MOVEMENT SETTINGS (Angles in Degrees)
+// 2. DUAL ARM SETTINGS
 // ----------------------------------------------------------------------------
 const int ARM_DOWN_ANGLE = 20;   // Rest position down
-const int ARM_UP_ANGLE   = 130;  // Raised up position (hands in the air!)
+const int ARM_UP_ANGLE   = 130;  // Raised up in the air!
 
 float currentServoAngle  = ARM_DOWN_ANGLE;
 float targetServoAngle   = ARM_DOWN_ANGLE;
-float armSpeed           = 1.5;  // Smooth gliding speed
+float armSpeed           = 1.5;
 
-// Set to 'true' so both arms raise UP together in unison!
 const bool MIRROR_RIGHT_ARM = true;
 
 // ----------------------------------------------------------------------------
-// 3. EYE ANIMATIONS & EMOTIONS
+// 3. ANIMATION & EMOTIONS
 // ----------------------------------------------------------------------------
 enum RobotEmotion {
-  EMO_NORMAL,
-  EMO_HAPPY,
-  EMO_SURPRISED,
-  EMO_BLINK
+  EMO_CREEPER_NORMAL,
+  EMO_CREEPER_HAPPY,
+  EMO_CREEPER_SURPRISED,
+  EMO_CREEPER_BLINK
 };
 
-RobotEmotion currentEmotion = EMO_NORMAL;
-
-// Eye dimensions on the 128x64 screen
-const int EYE_WIDTH       = 32;
-const int EYE_HEIGHT      = 38;
-const int EYE_CORNER_RAD  = 8;
-const int LEFT_EYE_X      = 22;
-const int RIGHT_EYE_X     = 74;
-const int EYE_Y           = 13;
+RobotEmotion currentEmotion = EMO_CREEPER_NORMAL;
 
 int gazeOffsetX = 0;
 int gazeOffsetY = 0;
@@ -75,7 +66,6 @@ int blinkProgress = 0;
 unsigned long lastBlinkTime = 0;
 unsigned long nextBlinkInterval = 3000;
 
-// Timing clocks (non-blocking millis)
 unsigned long lastArmUpdateTime = 0;
 unsigned long lastScreenUpdateTime = 0;
 unsigned long lastActionTime = 0;
@@ -83,90 +73,97 @@ unsigned long lastActionTime = 0;
 int currentRoutine = 0;
 
 // ----------------------------------------------------------------------------
-// 4. DRAWING THE FACES ON THE OLED SCREEN
+// 4. DRAWING THE MINECRAFT CREEPER FACE
 // ----------------------------------------------------------------------------
 
-// Welcome Splash Screen: Shows "WELCOME" and a big happy Smiley Face!
-void showWelcomeSmiley() {
-  display.clearDisplay();
+// Draws the iconic 8x8 Minecraft Creeper Face, perfectly scaled!
+void drawCreeperFace(int centerX, int centerY, int blockSize, bool inverted, int eyeShiftX, int eyeShiftY) {
+  int totalSize = blockSize * 8;
+  int startX = centerX - totalSize / 2;
+  int startY = centerY - totalSize / 2;
 
-  // Decorative border box
-  display.drawRoundRect(2, 2, 124, 60, 4, SSD1306_WHITE);
+  uint16_t skinColor = inverted ? SSD1306_BLACK : SSD1306_WHITE;
+  uint16_t featureColor = inverted ? SSD1306_WHITE : SSD1306_BLACK;
 
-  // Big Happy Smiley Face (Centered at X=42, Y=32)
-  display.drawCircle(40, 32, 22, SSD1306_WHITE); // Face contour
-  display.fillCircle(33, 26, 3, SSD1306_WHITE);  // Left eye
-  display.fillCircle(47, 26, 3, SSD1306_WHITE);  // Right eye
+  // 1. Draw Creeper Head Block
+  display.fillRect(startX, startY, totalSize, totalSize, skinColor);
 
-  // Big Smile Arc
-  display.drawCircle(40, 33, 12, SSD1306_WHITE);
-  display.fillRect(26, 20, 28, 13, SSD1306_BLACK); // Keep bottom smile arc
+  // 2. Pixelated Skin Texture Dots (gives it that authentic Minecraft pixel look!)
+  for (int x = 0; x < 8; x++) {
+    for (int y = 0; y < 8; y++) {
+      if ((x + y) % 3 == 0) {
+        display.drawRect(startX + x * blockSize, startY + y * blockSize, blockSize, blockSize, featureColor);
+      }
+    }
+  }
 
-  // Welcome Text on the right
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(2);
-  display.setCursor(70, 18);
-  display.println(F("HI!"));
-  
-  display.setTextSize(1);
-  display.setCursor(70, 38);
-  display.println(F("WELCOME"));
-
-  display.display();
-  delay(2500); // Show welcome message for 2.5 seconds
-}
-
-// Draw the real-time animated cartoon face
-void drawFace() {
-  display.clearDisplay();
-
-  // If blinking, shrink the eye height down to a thin cute slit
+  // If Blinking, close the eyes into a horizontal slit
   if (isBlinking) {
-    int eyeH = map(blinkProgress, 0, 100, EYE_HEIGHT, 4);
-    int eyeY = EYE_Y + (EYE_HEIGHT - eyeH) / 2;
-    display.fillRoundRect(LEFT_EYE_X + gazeOffsetX, eyeY, EYE_WIDTH, eyeH, 3, SSD1306_WHITE);
-    display.fillRoundRect(RIGHT_EYE_X + gazeOffsetX, eyeY, EYE_WIDTH, eyeH, 3, SSD1306_WHITE);
-    display.display();
-    return;
+    display.fillRect(startX + 1 * blockSize, startY + 1 * blockSize + blockSize / 2, 2 * blockSize, 3, featureColor);
+    display.fillRect(startX + 5 * blockSize, startY + 1 * blockSize + blockSize / 2, 2 * blockSize, 3, featureColor);
+  } else {
+    // 3. Left Eye (2x2 blocks at cell 1,1)
+    display.fillRect(startX + (1 * blockSize) + eyeShiftX, startY + (1 * blockSize) + eyeShiftY, 2 * blockSize, 2 * blockSize, featureColor);
+
+    // 4. Right Eye (2x2 blocks at cell 5,1)
+    display.fillRect(startX + (5 * blockSize) + eyeShiftX, startY + (1 * blockSize) + eyeShiftY, 2 * blockSize, 2 * blockSize, featureColor);
   }
 
-  // --- HAPPY FACE: Cute upward smiling eyes + smile mouth! ---
-  if (currentEmotion == EMO_HAPPY) {
-    display.fillRoundRect(LEFT_EYE_X, EYE_Y, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
-    display.fillCircle(LEFT_EYE_X + EYE_WIDTH / 2, EYE_Y + EYE_HEIGHT + 6, EYE_WIDTH / 1.5, SSD1306_BLACK);
+  // 5. Nose Bridge (2x1 blocks at cell 3,3)
+  display.fillRect(startX + 3 * blockSize, startY + 3 * blockSize, 2 * blockSize, 1 * blockSize, featureColor);
 
-    display.fillRoundRect(RIGHT_EYE_X, EYE_Y, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
-    display.fillCircle(RIGHT_EYE_X + EYE_WIDTH / 2, EYE_Y + EYE_HEIGHT + 6, EYE_WIDTH / 1.5, SSD1306_BLACK);
+  // 6. Upper Mouth (4x2 blocks at cell 2,4)
+  display.fillRect(startX + 2 * blockSize, startY + 4 * blockSize, 4 * blockSize, 2 * blockSize, featureColor);
 
-    // Cute smile mouth in the middle
-    display.drawCircle(64, 48, 8, SSD1306_WHITE);
-    display.fillRect(54, 40, 20, 8, SSD1306_BLACK);
-  }
-  // --- SURPRISED FACE: Wide round eyes with pupils! ---
-  else if (currentEmotion == EMO_SURPRISED) {
-    display.fillCircle(LEFT_EYE_X + EYE_WIDTH / 2, EYE_Y + EYE_HEIGHT / 2, 20, SSD1306_WHITE);
-    display.fillCircle(RIGHT_EYE_X + EYE_WIDTH / 2, EYE_Y + EYE_HEIGHT / 2, 20, SSD1306_WHITE);
+  // 7. Left Mouth Fang (1x2 blocks at cell 2,6)
+  display.fillRect(startX + 2 * blockSize, startY + 6 * blockSize, 1 * blockSize, 2 * blockSize, featureColor);
 
-    display.fillCircle(LEFT_EYE_X + EYE_WIDTH / 2 + gazeOffsetX, EYE_Y + EYE_HEIGHT / 2 + gazeOffsetY, 7, SSD1306_BLACK);
-    display.fillCircle(RIGHT_EYE_X + EYE_WIDTH / 2 + gazeOffsetX, EYE_Y + EYE_HEIGHT / 2 + gazeOffsetY, 7, SSD1306_BLACK);
+  // 8. Right Mouth Fang (1x2 blocks at cell 5,6)
+  display.fillRect(startX + 5 * blockSize, startY + 6 * blockSize, 1 * blockSize, 2 * blockSize, featureColor);
+}
 
-    display.drawCircle(64, 52, 4, SSD1306_WHITE); // "o" mouth
-  }
-  // --- NORMAL / IDLE FACE: Classic adorable robot eyes ---
-  else {
-    display.fillRoundRect(LEFT_EYE_X + gazeOffsetX, EYE_Y + gazeOffsetY, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
-    display.fillRoundRect(RIGHT_EYE_X + gazeOffsetX, EYE_Y + gazeOffsetY, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
+// Full screen Creeper layout with cool side banners
+void renderScreen() {
+  if (!oledFound) return;
 
-    // Shiny reflection dot
-    display.fillCircle(LEFT_EYE_X + gazeOffsetX + 6, EYE_Y + gazeOffsetY + 7, 3, SSD1306_BLACK);
-    display.fillCircle(RIGHT_EYE_X + gazeOffsetX + 6, EYE_Y + gazeOffsetY + 7, 3, SSD1306_BLACK);
+  display.clearDisplay();
+
+  // Draw 56x56 pixel authentic Minecraft Creeper Face in the center!
+  drawCreeperFace(64, 32, 7, false, gazeOffsetX, gazeOffsetY);
+
+  // Side text banners
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  if (currentEmotion == EMO_CREEPER_HAPPY) {
+    display.setCursor(4, 22);
+    display.println(F("HI!"));
+    display.setCursor(4, 34);
+    display.println(F("FRIEND"));
+
+    display.setCursor(96, 22);
+    display.println(F("ARMS"));
+    display.setCursor(96, 34);
+    display.println(F("UP! ^_^"));
+  } else if (currentEmotion == EMO_CREEPER_SURPRISED) {
+    display.setCursor(4, 28);
+    display.println(F("WHAT?"));
+
+    display.setCursor(96, 28);
+    display.println(F("BOOM!"));
+  } else {
+    display.setCursor(4, 28);
+    display.println(F("CREEPER"));
+
+    display.setCursor(98, 28);
+    display.println(F("BOT 🤖"));
   }
 
   display.display();
 }
 
 // ----------------------------------------------------------------------------
-// 5. UPDATE FUNCTIONS (Smooth Movement)
+// 5. UPDATE FUNCTIONS
 // ----------------------------------------------------------------------------
 
 void updateArms() {
@@ -200,7 +197,7 @@ void updateBlinking() {
   }
 
   if (isBlinking) {
-    blinkProgress += 20;
+    blinkProgress += 25;
     if (blinkProgress >= 100) {
       isBlinking = false;
       lastBlinkTime = now;
@@ -217,40 +214,40 @@ void updateRobotBehavior() {
     currentRoutine = (currentRoutine + 1) % 4;
 
     switch (currentRoutine) {
-      // 0: Arms Resting Down + Looking straight
+      // 0: Arms Resting Down + Creeper looking straight ahead
       case 0:
         targetServoAngle = ARM_DOWN_ANGLE;
         armSpeed = 1.2;
-        currentEmotion = EMO_NORMAL;
+        currentEmotion = EMO_CREEPER_NORMAL;
         gazeOffsetX = 0;
         gazeOffsetY = 0;
         break;
 
-      // 1: Both arms raise UP in the air! Face turns Super HAPPY! 🙌
+      // 1: Both arms swing UP together! Creeper is HAPPY!
       case 1:
         targetServoAngle = ARM_UP_ANGLE;
         armSpeed = 2.0;
-        currentEmotion = EMO_HAPPY;
+        currentEmotion = EMO_CREEPER_HAPPY;
         gazeOffsetX = 0;
-        gazeOffsetY = -2;
+        gazeOffsetY = -1;
         break;
 
-      // 2: Arms hold halfway & robot looks surprised to the LEFT! 😲
+      // 2: Arms hold halfway, Creeper looks to the LEFT!
       case 2:
         targetServoAngle = 75;
         armSpeed = 2.8;
-        currentEmotion = EMO_SURPRISED;
-        gazeOffsetX = -6;
+        currentEmotion = EMO_CREEPER_SURPRISED;
+        gazeOffsetX = -2;
         gazeOffsetY = 0;
         break;
 
-      // 3: Robot looks to the RIGHT & lowers arms gently
+      // 3: Creeper looks to the RIGHT & lowers arms gently
       case 3:
         targetServoAngle = ARM_DOWN_ANGLE;
         armSpeed = 1.5;
-        currentEmotion = EMO_NORMAL;
-        gazeOffsetX = 6;
-        gazeOffsetY = 2;
+        currentEmotion = EMO_CREEPER_NORMAL;
+        gazeOffsetX = 2;
+        gazeOffsetY = 1;
         break;
     }
   }
@@ -260,19 +257,48 @@ void updateRobotBehavior() {
 // 6. SETUP & MAIN LOOP
 // ----------------------------------------------------------------------------
 void setup() {
-  Serial.begin(115200);
-  Serial.println(F("Starting Dual-Servo Wooden Robot..."));
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
 
-  // 1. Start the OLED Display
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
-    Serial.println(F("OLED not found! Check SDA/SCL wires."));
-    for (;;);
+  Serial.begin(115200);
+  Serial.println(F("Starting Minecraft Creeper Robot..."));
+
+  Wire.begin();
+  #if defined(WIRE_HAS_TIMEOUT)
+    Wire.setWireTimeout(3000, true);
+  #endif
+
+  // Try address 0x3C first (most common), then 0x3D
+  if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    oledFound = true;
+    Serial.println(F("OLED found at 0x3C!"));
+  } else if (display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+    oledFound = true;
+    Serial.println(F("OLED found at 0x3D!"));
+  } else {
+    Serial.println(F("WARNING: OLED not detected yet. Check SDA/SCL wires!"));
   }
 
-  // 2. Show the Welcome Smiley Screen!
-  showWelcomeSmiley();
+  // Startup Splash: Show Welcome Creeper!
+  if (oledFound) {
+    display.clearDisplay();
+    display.drawRoundRect(2, 2, 124, 60, 4, SSD1306_WHITE);
+    drawCreeperFace(40, 32, 6, false, 0, 0);
 
-  // 3. Attach Both Servos
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(2);
+    display.setCursor(72, 16);
+    display.println(F("HI!"));
+
+    display.setTextSize(1);
+    display.setCursor(72, 38);
+    display.println(F("WELCOME"));
+
+    display.display();
+    delay(2000);
+  }
+
+  // Attach Both Servos
   leftServo.attach(LEFT_SERVO_PIN);
   rightServo.attach(RIGHT_SERVO_PIN);
 
@@ -285,13 +311,17 @@ void setup() {
 }
 
 void loop() {
-  updateArms();          // 1. Smoothly glide BOTH synchronized arms
-  updateBlinking();      // 2. Natural eye blinking
-  updateRobotBehavior(); // 3. Mood and arm choreographies
+  // 1. Heartbeat indicator: Blinks the "L" LED smoothly every 1 second so you KNOW it's running!
+  digitalWrite(LED_PIN, (millis() / 500) % 2);
 
-  // Draw face at ~30 FPS
+  // 2. Continuous background robot tasks
+  updateArms();          // Synchronized arm swing
+  updateBlinking();      // Creeper eye blinking
+  updateRobotBehavior(); // Moods & routines
+
+  // 3. Render Creeper Face at ~30 FPS
   if (millis() - lastScreenUpdateTime >= 33) {
     lastScreenUpdateTime = millis();
-    drawFace();
+    renderScreen();
   }
 }
