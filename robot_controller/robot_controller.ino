@@ -1,20 +1,19 @@
 /*
  * ============================================================================
- *   CUTE ANIMATED ROBOT COMPANION (DEFAULT: ADORABLE BLINKING EYES!) 🤖✨
- *   Dual-Arm Synchronized Robot + Expressive Cartoon OLED Face
+ *   ULTRA-COOL ANIMATED ROBOT COMPANION (DISNEY/PIXAR STYLE!) 🤖✨💖
  * ============================================================================
- *   Serial Commands (115200 baud):
- *     - '3' or 'ROBOT'     = Cute Animated Blinking Robot Face! 🤖 (DEFAULT)
- *     - '1' or 'CREEPER'   = Pixel-Accurate Minecraft Creeper! 🟩
- *     - '2' or 'HEROBRINE' = Spooky Glowing Herobrine Face! 👻
- *
- *     - 'S'   = STOP / FREEZE ARMS! 🛑
- *     - 'W'   = RESUME Auto-Dance / Wave! 👋
- *     - 'U'   = Both Arms UP! 🙌
- *     - 'D'   = Both Arms DOWN! 👇
- *     - 'C'   = Calibration Mode (Locks at 90°) 🎯
- *     - 'L+' / 'L-' = Left arm trim
- *     - 'R+' / 'R-' = Right arm trim
+ *   Features:
+ *     - Natural Double-Blinks & Micro-Breathing Eye Physics
+ *     - Dual-Glossy Reflection Twinkle Sparkles
+ *     - Playful Expressions:
+ *         * Normal Curious Eyes (Glancing & Micro-Blinks)
+ *         * Playful Wink 😉 ('K')
+ *         * Glowing Heart Eyes ❤️ ('H')
+ *         * Happy Squint Smile 🙌 ('U')
+ *         * Surprised Wide Eyes 😲 ('O')
+ *         * 1:1 Pixel Creeper 🟩 ('1')
+ *         * Glowing Herobrine 👻 ('2')
+ *     - Full Synchronized Servo Arm Motion & Stop Controls
  * ============================================================================
  */
 
@@ -30,42 +29,38 @@ Servo leftServo;
 Servo rightServo;
 
 // ----------------------------------------------------------------------------
-// 1. FACE MODES (DEFAULT: CUTE ROBOT!)
+// 1. ROBOT MOODS & FACES
 // ----------------------------------------------------------------------------
 enum FaceMode {
-  FACE_CUTE_ROBOT,   // Default: Big adorable blinking eyes!
-  FACE_CREEPER,      // 1:1 Pixel Minecraft Creeper
-  FACE_HEROBRINE     // Glowing Herobrine Face
+  FACE_COOL_ROBOT,   // Ultra-cool cartoon robot eyes (Default)
+  FACE_CREEPER,      // Minecraft Creeper
+  FACE_HEROBRINE     // Minecraft Herobrine
 };
 
-FaceMode currentFace = FACE_CUTE_ROBOT; // <-- DEFAULT FACE!
+enum RobotMood {
+  MOOD_NORMAL,       // Glossy curious eyes glancing around
+  MOOD_HAPPY,        // Upward crescent smile eyes + smile mouth + blush
+  MOOD_WINK,         // Cheeky playful wink 😉
+  MOOD_HEART,        // Adorable glowing pixel hearts ❤️
+  MOOD_SURPRISED     // Wide expanded pupils 😲
+};
 
-// Minecraft Creeper Pixel Map
+FaceMode currentFace = FACE_COOL_ROBOT; // Default!
+RobotMood currentMood = MOOD_NORMAL;
+
+// Minecraft Pixel Maps (Available anytime!)
 const uint8_t CREEPER_MAP[8] PROGMEM = {
-  0b11111111,
-  0b10011001,
-  0b10011001,
-  0b11100111,
-  0b11000011,
-  0b11000011,
-  0b11011011,
-  0b11011011
+  0b11111111, 0b10011001, 0b10011001, 0b11100111,
+  0b11000011, 0b11000011, 0b11011011, 0b11011011
 };
 
-// Minecraft Herobrine Pixel Map
 const uint8_t HEROBRINE_MAP[8] PROGMEM = {
-  0b11111111,
-  0b11000011,
-  0b01100110,
-  0b00011000,
-  0b00111100,
-  0b01111110,
-  0b00111100,
-  0b00000000
+  0b11111111, 0b11000011, 0b01100110, 0b00011000,
+  0b00111100, 0b01111110, 0b00111100, 0b00000000
 };
 
 // ----------------------------------------------------------------------------
-// 2. CALIBRATION & MOTION SETTINGS
+// 2. SERVO MOTION & CALIBRATION SETTINGS
 // ----------------------------------------------------------------------------
 int leftOffset  = 0;
 int rightOffset = 0;
@@ -82,20 +77,29 @@ bool autoDanceMode = true;
 bool calibrationMode = false;
 bool isStopped = false;
 
+// ----------------------------------------------------------------------------
+// 3. EYE ANIMATION PHYSICS (Saccades, Double Blinks, Breathing)
+// ----------------------------------------------------------------------------
+int eyeShiftX = 0;
+int eyeShiftY = 0;
+int eyeTargetShiftX = 0;
+
+// Eyelid blink state
+int blinkProgress = 0; // 0 = wide open, 100 = closed slit
+bool isBlinking = false;
+bool doubleBlinkQueued = false;
+unsigned long lastBlinkTime = 0;
+unsigned long nextBlinkInterval = 3000;
+unsigned long blinkStepTimer = 0;
+
 // Timers
 unsigned long lastArmUpdateTime = 0;
-unsigned long lastActionTime = 0;
-unsigned long lastBlinkTime = 0;
-unsigned long nextBlinkInterval = 3200;
+unsigned long lastBehaviorTime = 0;
 unsigned long lastOledDraw = 0;
-
-int blinkState = 0; // 0 = open, 1 = half, 2 = fully closed
 int currentRoutine = 0;
-int eyeShiftX = 0;
-bool isHappy = false;
 
 // ----------------------------------------------------------------------------
-// 3. HARDWARE SH1106 OLED CONTROLLER
+// 4. HARDWARE SH1106 OLED CONTROLLER
 // ----------------------------------------------------------------------------
 
 void sendSH1106Command(uint8_t cmd) {
@@ -124,38 +128,58 @@ void initSH1106() {
 }
 
 // ----------------------------------------------------------------------------
-// 4. THE CUTE BLINKING ROBOT FACE ENGINE
+// 5. ULTRA-COOL ROBOT EYE RENDERING ENGINE
 // ----------------------------------------------------------------------------
-bool isInsideCuteEye(int x, int y, int centerX, int centerY, int shiftX, int blink, bool happy) {
-  int curX = centerX + shiftX;
-  int curY = centerY;
 
-  int w = 26; // Eye width
-  int h = 34; // Eye height when open
+// Check if pixel (x, y) falls inside a glowing Heart shape
+bool isInsideHeart(int x, int y, int centerX, int centerY) {
+  int relX = x - centerX;
+  int relY = y - (centerY - 1);
+  // Scale down to 14x14 heart math
+  float hx = (float)relX / 9.0;
+  float hy = (float)(-relY) / 9.0;
+  // Heart formula: (x^2 + y^2 - 1)^3 - x^2 * y^3 <= 0
+  float a = (hx*hx + hy*hy - 1.0);
+  return ((a*a*a - hx*hx*hy*hy*hy) <= 0.0);
+}
 
-  // If Happy: eyes turn into upward curved crescents!
-  if (happy) {
-    int dx = x - curX;
-    int dy = y - (curY + 2);
-    // Outer circle
-    if (dx*dx + dy*dy <= 169) { // radius 13
-      // Cut out bottom to make a smiling crescent curve
-      if (y <= curY + 4 && (dx*dx + (dy-6)*(dy-6) > 49)) {
+// Check if pixel (x, y) falls inside an eye
+bool isInsideEyePixel(int x, int y, int centerX, int centerY, bool isRightEye) {
+  // If HEART MODE: Draw cute glowing hearts!
+  if (currentMood == MOOD_HEART) {
+    return isInsideHeart(x, y, centerX + eyeShiftX, centerY);
+  }
+
+  // If WINK MODE: Right eye winks shut in a cute curved arc, Left eye stays wide open!
+  if (currentMood == MOOD_WINK && isRightEye) {
+    int dx = x - (centerX + eyeShiftX);
+    int dy = y - (centerY + 2);
+    // Cute curved wink line
+    return (dx >= -12 && dx <= 12 && abs(dy - (dx*dx)/28) <= 2);
+  }
+
+  // If HAPPY SQUINT: Inverted upward smiling crescents
+  if (currentMood == MOOD_HAPPY) {
+    int dx = x - (centerX + eyeShiftX);
+    int dy = y - (centerY + 3);
+    if (dx*dx + dy*dy <= 196) { // radius 14
+      if (y <= centerY + 4 && (dx*dx + (dy - 7)*(dy - 7) > 64)) {
         return true;
       }
     }
     return false;
   }
 
-  // Normal Eyelid Blinking
-  if (blink == 2) {
-    // Stage 2: Closed eye slit (cute rounded horizontal line)
-    return (x >= curX - 12 && x <= curX + 12 && y >= curY - 2 && y <= curY + 2);
-  } else if (blink == 1) {
-    // Stage 1: Half-closed drooping eye
-    h = 16;
-    curY += 6;
-  }
+  // NORMAL / SURPRISED EYES with dynamic eyelid physics
+  int curX = centerX + eyeShiftX;
+  int curY = centerY;
+
+  int w = (currentMood == MOOD_SURPRISED) ? 30 : 26;
+  int fullH = (currentMood == MOOD_SURPRISED) ? 38 : 34;
+
+  // Calculate current eye height based on blink progress
+  int h = map(blinkProgress, 0, 100, fullH, 3);
+  if (h < 3) h = 3;
 
   int x0 = curX - w / 2;
   int x1 = curX + w / 2;
@@ -163,21 +187,47 @@ bool isInsideCuteEye(int x, int y, int centerX, int centerY, int shiftX, int bli
   int y1 = curY + h / 2;
 
   if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
-    // Cut rounded corners
-    if ((x == x0 || x == x1) && (y == y0 || y == y1)) return false;
-    if ((x == x0+1 || x == x1-1) && (y == y0 || y == y1)) return false;
-    if ((x == x0 || x == x1) && (y == y0+1 || y == y1-1)) return false;
+    // Eyelid slit when fully shut
+    if (blinkProgress >= 85) return true;
 
-    // Shiny Gloss Reflection Dot (top-right sparkle)
-    if (blink == 0 && (x >= curX + 4 && x <= curX + 7 && y >= curY - 11 && y <= curY - 8)) {
-      return false; // Sparkle cutout!
+    // Smooth rounded corners
+    int rad = 6;
+    if (x < x0 + rad && y < y0 + rad) {
+      int dx = x - (x0 + rad); int dy = y - (y0 + rad);
+      if (dx*dx + dy*dy > rad*rad) return false;
     }
+    if (x > x1 - rad && y < y0 + rad) {
+      int dx = x - (x1 - rad); int dy = y - (y0 + rad);
+      if (dx*dx + dy*dy > rad*rad) return false;
+    }
+    if (x < x0 + rad && y > y1 - rad) {
+      int dx = x - (x0 + rad); int dy = y - (y1 - rad);
+      if (dx*dx + dy*dy > rad*rad) return false;
+    }
+    if (x > x1 - rad && y > y1 - rad) {
+      int dx = x - (x1 - rad); int dy = y - (y1 - rad);
+      if (dx*dx + dy*dy > rad*rad) return false;
+    }
+
+    // --- DUAL GLOSSY SPARKLE CUTOUTS (Disney/WALL-E style!) ---
+    if (blinkProgress < 20) {
+      // 1. Primary Highlight (Big 4x4 glossy reflection)
+      if (x >= curX + 3 && x <= curX + 7 && y >= curY - 12 && y <= curY - 8) {
+        return false;
+      }
+      // 2. Secondary Highlight (Cute 2x2 baby twinkle dot)
+      if (x >= curX - 7 && x <= curX - 5 && y >= curY + 6 && y <= curY + 8) {
+        return false;
+      }
+    }
+
     return true;
   }
+
   return false;
 }
 
-// Renders the chosen face directly to the 1.3" OLED screen
+// Renders the full OLED screen
 void renderFaceToScreen() {
   for (uint8_t p = 0; p < 8; p++) {
     Wire.beginTransmission(OLED_I2C_ADDR);
@@ -191,42 +241,41 @@ void renderFaceToScreen() {
       uint8_t pixelByte = 0x00;
 
       // ======================================================================
-      // FACE 1: CUTE BLINKING ANIMATED ROBOT (DEFAULT!)
+      // FACE 1: ULTRA-COOL ROBOT FACE (DEFAULT!)
       // ======================================================================
-      if (currentFace == FACE_CUTE_ROBOT) {
+      if (currentFace == FACE_COOL_ROBOT) {
         for (uint8_t bit = 0; bit < 8; bit++) {
           int y = p * 8 + bit;
           bool on = false;
 
           // Left Eye (Center X=38, Y=28)
-          if (isInsideCuteEye(col, y, 38, 28, eyeShiftX, blinkState, isHappy)) {
-            on = true;
-          }
-          // Right Eye (Center X=90, Y=28)
-          if (isInsideCuteEye(col, y, 90, 28, eyeShiftX, blinkState, isHappy)) {
-            on = true;
-          }
+          if (isInsideEyePixel(col, y, 38, 28, false)) on = true;
 
-          // Cute Smile Mouth (At center X=64, Y=51)
-          if (isHappy) {
-            // Big happy smile arc
+          // Right Eye (Center X=90, Y=28)
+          if (isInsideEyePixel(col, y, 90, 28, true)) on = true;
+
+          // --- MOUTH & ACCENTS ---
+          if (currentMood == MOOD_HAPPY || currentMood == MOOD_HEART) {
+            // Cheerful Smile Arc at center X=64, Y=50
             int dx = col - 64;
             int dy = y - 48;
-            if (dx*dx + dy*dy <= 49 && dx*dx + dy*dy >= 25 && y >= 49) {
-              on = true;
-            }
-          } else {
-            // Calm little friendly mouth
-            if (y == 52 && col >= 60 && col <= 68) {
-              on = true;
-            } else if (y == 51 && (col == 59 || col == 69)) {
-              on = true; // upturned corners!
-            }
-          }
+            if (dx*dx + dy*dy <= 49 && dx*dx + dy*dy >= 25 && y >= 49) on = true;
 
-          // Rosy Cheeks (Cute little blush lines under eyes!)
-          if (isHappy && y == 44) {
-            if ((col >= 22 && col <= 26) || (col >= 102 && col <= 106)) on = true;
+            // Rosy Cute Blush lines under eyes
+            if (y == 44 && ((col >= 22 && col <= 26) || (col >= 102 && col <= 106))) on = true;
+          } else if (currentMood == MOOD_WINK) {
+            // Cheeky Smirk mouth
+            if (y == 51 && col >= 62 && col <= 72) on = true;
+            if (y == 50 && col == 73) on = true;
+          } else if (currentMood == MOOD_SURPRISED) {
+            // Cute "O" Mouth
+            int dx = col - 64;
+            int dy = y - 51;
+            if (dx*dx + dy*dy <= 20 && dx*dx + dy*dy >= 8) on = true;
+          } else {
+            // Calm cute robot mouth
+            if (y == 52 && col >= 60 && col <= 68) on = true;
+            if (y == 51 && (col == 59 || col == 69)) on = true;
           }
 
           if (on) pixelByte |= (1 << bit);
@@ -234,7 +283,7 @@ void renderFaceToScreen() {
       }
 
       // ======================================================================
-      // FACE 2: MINECRAFT CREEPER (1:1 Square)
+      // FACE 2: MINECRAFT CREEPER
       // ======================================================================
       else if (currentFace == FACE_CREEPER) {
         if (col >= 40 && col < 88) {
@@ -246,12 +295,10 @@ void renderFaceToScreen() {
               uint8_t rowData = pgm_read_byte(&CREEPER_MAP[faceRow]);
               bool feature = (rowData & (1 << (7 - faceCol))) != 0;
 
-              if (blinkState == 2 && (faceRow == 1 || faceRow == 2) && (faceCol == 1 || faceCol == 2 || faceCol == 5 || faceCol == 6)) {
+              if (blinkProgress >= 80 && (faceRow == 1 || faceRow == 2) && (faceCol == 1 || faceCol == 2 || faceCol == 5 || faceCol == 6)) {
                 if (faceRow == 2 && (y % 6 >= 3)) pixelByte |= (1 << bit);
               } else {
-                if (feature) {
-                  if ((col + y) % 6 != 0) pixelByte |= (1 << bit); // Pixel texture
-                }
+                if (feature && ((col + y) % 6 != 0)) pixelByte |= (1 << bit);
               }
             }
           }
@@ -272,7 +319,7 @@ void renderFaceToScreen() {
               bool feature = (rowData & (1 << (7 - faceCol))) != 0;
 
               if (faceRow == 2 && (faceCol == 1 || faceCol == 2 || faceCol == 5 || faceCol == 6)) {
-                if (blinkState != 2) pixelByte |= (1 << bit); // Glowing eyes!
+                if (blinkProgress < 80) pixelByte |= (1 << bit);
               } else {
                 if (feature) pixelByte |= (1 << bit);
               }
@@ -281,7 +328,6 @@ void renderFaceToScreen() {
         }
       }
 
-      // Send 16-byte burst
       if (col % 16 == 0) {
         Wire.endTransmission();
         Wire.beginTransmission(OLED_I2C_ADDR);
@@ -294,7 +340,51 @@ void renderFaceToScreen() {
 }
 
 // ----------------------------------------------------------------------------
-// 5. UPDATE FUNCTIONS
+// 6. LIFE-LIKE ANIMATION PHYSICS & DOUBLE-BLINKS
+// ----------------------------------------------------------------------------
+
+void updateBlinkingAndEyes() {
+  unsigned long now = millis();
+
+  // Smooth Saccadic Eye Glancing (eased movement)
+  if (eyeShiftX != eyeTargetShiftX) {
+    if (eyeShiftX < eyeTargetShiftX) eyeShiftX++;
+    else eyeShiftX--;
+  }
+
+  // Natural Blinking Machine
+  if (!isBlinking && (now - lastBlinkTime > nextBlinkInterval)) {
+    isBlinking = true;
+    blinkProgress = 0;
+    blinkStepTimer = now;
+    // 30% chance to do a playful double-blink!
+    doubleBlinkQueued = (random(0, 10) < 3);
+  }
+
+  if (isBlinking) {
+    if (now - blinkStepTimer >= 18) { // 18ms per frame step
+      blinkStepTimer = now;
+      if (blinkProgress < 100) {
+        blinkProgress += 25; // Quick closing
+      } else {
+        // Pop back open!
+        blinkProgress = 0;
+        isBlinking = false;
+        lastBlinkTime = now;
+
+        if (doubleBlinkQueued) {
+          doubleBlinkQueued = false;
+          nextBlinkInterval = 120; // Immediate second blink!
+        } else {
+          nextBlinkInterval = random(2400, 5000);
+        }
+      }
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 7. SYNCHRONIZED ARMS & BEHAVIOR
 // ----------------------------------------------------------------------------
 
 void updateArms() {
@@ -330,68 +420,58 @@ void updateArms() {
   }
 }
 
-// Fluid 3-stage natural eyelid blinking
-void updateBlinking() {
-  unsigned long now = millis();
-
-  static unsigned long blinkStageTimer = 0;
-
-  if (blinkState == 0 && (now - lastBlinkTime > nextBlinkInterval)) {
-    blinkState = 1; // Stage 1: Half-closed
-    blinkStageTimer = now;
-  } else if (blinkState == 1 && (now - blinkStageTimer > 50)) {
-    blinkState = 2; // Stage 2: Fully closed slit
-    blinkStageTimer = now;
-  } else if (blinkState == 2 && (now - blinkStageTimer > 90)) {
-    blinkState = 0; // Stage 0: Pop wide open!
-    lastBlinkTime = now;
-    nextBlinkInterval = random(2500, 5500);
-  }
-}
-
 void updateRobotBehavior() {
   if (!autoDanceMode || calibrationMode || isStopped) return;
 
   unsigned long now = millis();
 
-  if (now - lastActionTime > 3500) {
-    lastActionTime = now;
-    currentRoutine = (currentRoutine + 1) % 4;
+  if (now - lastBehaviorTime > 3600) {
+    lastBehaviorTime = now;
+    currentRoutine = (currentRoutine + 1) % 5;
 
     switch (currentRoutine) {
-      // 0: Arms Resting Down + Look Straight
+      // 0: Relaxed posture + Normal Curious Eyes
       case 0:
         targetServoAngle = ARM_DOWN_ANGLE;
         armSpeed = 1.5;
-        eyeShiftX = 0;
-        isHappy = false;
+        eyeTargetShiftX = 0;
+        currentMood = MOOD_NORMAL;
         Serial.println(F("[ROBOT] Resting posture"));
         break;
 
-      // 1: Arms UP in the air! Face smiles happily! 🙌
+      // 1: Arms UP! Super Happy Squint + Rosy Cheeks! 🙌
       case 1:
         targetServoAngle = ARM_UP_ANGLE;
         armSpeed = 2.5;
-        eyeShiftX = 0;
-        isHappy = true; // Happy smiling eyes + smile mouth!
-        Serial.println(F("[ROBOT] Hands UP & Happy Smile! 🙌"));
+        eyeTargetShiftX = 0;
+        currentMood = MOOD_HAPPY;
+        Serial.println(F("[ROBOT] Arms UP & Super Happy! 🙌"));
         break;
 
-      // 2: Glance Left
+      // 2: Glance Left with Curious Eyes
       case 2:
         targetServoAngle = 80;
         armSpeed = 3.0;
-        eyeShiftX = -4; // Look Left
-        isHappy = false;
+        eyeTargetShiftX = -5; // Glance Left
+        currentMood = MOOD_NORMAL;
         Serial.println(F("[ROBOT] Glancing Left"));
         break;
 
-      // 3: Glance Right
+      // 3: Playful Wink 😉
       case 3:
+        targetServoAngle = 100;
+        armSpeed = 2.0;
+        eyeTargetShiftX = 3;
+        currentMood = MOOD_WINK;
+        Serial.println(F("[ROBOT] Playful Wink! 😉"));
+        break;
+
+      // 4: Arms Down + Glance Right
+      case 4:
         targetServoAngle = ARM_DOWN_ANGLE;
         armSpeed = 1.8;
-        eyeShiftX = 4; // Look Right
-        isHappy = false;
+        eyeTargetShiftX = 5; // Glance Right
+        currentMood = MOOD_NORMAL;
         Serial.println(F("[ROBOT] Glancing Right"));
         break;
     }
@@ -399,7 +479,7 @@ void updateRobotBehavior() {
 }
 
 // ----------------------------------------------------------------------------
-// 6. SERIAL COMMAND PROCESSOR
+// 8. SERIAL COMMAND PROCESSOR
 // ----------------------------------------------------------------------------
 
 void checkSerialCommands() {
@@ -408,9 +488,26 @@ void checkSerialCommands() {
     cmd.trim();
     cmd.toUpperCase();
 
-    if (cmd == "3" || cmd == "ROBOT") {
-      currentFace = FACE_CUTE_ROBOT;
-      Serial.println(F("\n🤖 [FACE]: Cute Blinking Animated Robot Face! (Default)"));
+    // --- INSTANT EXPRESSION COMMANDS ---
+    if (cmd == "H" || cmd == "HEART") {
+      currentFace = FACE_COOL_ROBOT;
+      currentMood = MOOD_HEART;
+      Serial.println(F("\n💖 [EXPRESSION]: Glowing Heart Eyes! ❤️"));
+    }
+    else if (cmd == "K" || cmd == "WINK") {
+      currentFace = FACE_COOL_ROBOT;
+      currentMood = MOOD_WINK;
+      Serial.println(F("\n😉 [EXPRESSION]: Playful Cheeky Wink!"));
+    }
+    else if (cmd == "O" || cmd == "SURPRISED") {
+      currentFace = FACE_COOL_ROBOT;
+      currentMood = MOOD_SURPRISED;
+      Serial.println(F("\n😲 [EXPRESSION]: Surprised Wide Eyes!"));
+    }
+    else if (cmd == "3" || cmd == "ROBOT") {
+      currentFace = FACE_COOL_ROBOT;
+      currentMood = MOOD_NORMAL;
+      Serial.println(F("\n🤖 [EXPRESSION]: Cute Cartoon Robot Eyes (Default)"));
     }
     else if (cmd == "1" || cmd == "CREEPER") {
       currentFace = FACE_CREEPER;
@@ -420,6 +517,8 @@ void checkSerialCommands() {
       currentFace = FACE_HEROBRINE;
       Serial.println(F("\n👻 [FACE]: Spooky Glowing Herobrine Face!"));
     }
+
+    // --- ARM MOTION COMMANDS ---
     else if (cmd == "S" || cmd == "STOP") {
       isStopped = true;
       autoDanceMode = false;
@@ -451,15 +550,15 @@ void checkSerialCommands() {
       calibrationMode = false;
       autoDanceMode = false;
       targetServoAngle = ARM_UP_ANGLE;
-      isHappy = true;
-      Serial.println(F("[COMMAND] Arms UP! 🙌"));
+      currentMood = MOOD_HAPPY;
+      Serial.println(F("[COMMAND] Arms UP & Happy! 🙌"));
     }
     else if (cmd == "D") {
       isStopped = false;
       calibrationMode = false;
       autoDanceMode = false;
       targetServoAngle = ARM_DOWN_ANGLE;
-      isHappy = false;
+      currentMood = MOOD_NORMAL;
       Serial.println(F("[COMMAND] Arms DOWN! 👇"));
     }
     else if (cmd == "W") {
@@ -481,7 +580,7 @@ void checkSerialCommands() {
 }
 
 // ----------------------------------------------------------------------------
-// 7. SETUP & MAIN LOOP
+// 9. SETUP & MAIN LOOP
 // ----------------------------------------------------------------------------
 
 void setup() {
@@ -490,12 +589,15 @@ void setup() {
 
   Serial.begin(115200);
   Serial.println(F("\n============================================="));
-  Serial.println(F("   CUTE ANIMATED ROBOT READY! 🤖✨"));
-  Serial.println(F("   Default Face: Cute Blinking Cartoon Eyes"));
-  Serial.println(F("   Commands:"));
-  Serial.println(F("     '3' = Cute Robot (Default) | '1' = Creeper | '2' = Herobrine"));
-  Serial.println(F("     'S' = Stop | 'W' = Dance | 'U' = Up | 'D' = Down"));
-  Serial.println(F("     'C' = Calibrate"));
+  Serial.println(F("   ULTRA-COOL ANIMATED ROBOT READY! 🤖✨💖"));
+  Serial.println(F("   COOL EXPRESSIONS:"));
+  Serial.println(F("     'H' = Heart Eyes ❤️  |  'K' = Playful Wink 😉"));
+  Serial.println(F("     'O' = Surprised 😲   |  '3' = Cartoon Eyes"));
+  Serial.println(F("     '1' = Creeper 🟩     |  '2' = Herobrine 👻"));
+  Serial.println(F("   ARM CONTROLS:"));
+  Serial.println(F("     'S' = Stop/Freeze    |  'W' = Dance"));
+  Serial.println(F("     'U' = Arms Up        |  'D' = Arms Down"));
+  Serial.println(F("     'C' = Calibrate 90 deg"));
   Serial.println(F("=============================================\n"));
 
   // 1. Initialize Servos
@@ -511,23 +613,25 @@ void setup() {
   renderFaceToScreen();
 
   lastBlinkTime = millis();
-  lastActionTime = millis();
+  lastBehaviorTime = millis();
 }
 
 void loop() {
   // 1. Heartbeat LED
   digitalWrite(LED_PIN, (millis() / 500) % 2);
 
-  // 2. Read Serial Commands
+  // 2. Check Serial Commands
   checkSerialCommands();
 
-  // 3. Move Arms
+  // 3. Update Eyelid Physics & Eye Glancing
+  updateBlinkingAndEyes();
+
+  // 4. Update Arm Positions & Routines
   updateArms();
-  updateBlinking();
   updateRobotBehavior();
 
-  // 4. Render Face at smooth ~20 FPS
-  if (millis() - lastOledDraw >= 50) {
+  // 5. Render Screen at smooth ~25 FPS
+  if (millis() - lastOledDraw >= 40) {
     lastOledDraw = millis();
     renderFaceToScreen();
   }
