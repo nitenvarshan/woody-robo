@@ -1,7 +1,7 @@
 /*
  * ============================================================================
  *   SUPER COOL WOODEN ROBOT COMPANION (DUAL SERVO VERSION!)
- *   Dual-Arm Synchronized Robot + Expressive OLED Face
+ *   Dual-Arm Synchronized Robot + Expressive OLED Face + Welcome Smiley
  * ============================================================================
  *   Board: Arduino Uno R3 (Direct Pin Connections - No Breadboard Needed!)
  *   Display: 1.3" or 0.96" I2C OLED (128x64)
@@ -23,7 +23,7 @@
 #define SCREEN_HEIGHT 64
 #define OLED_RESET    -1
 
-// Most OLEDs use 0x3C
+// Most OLEDs use 0x3C (if not, try 0x3D)
 #define OLED_I2C_ADDRESS 0x3C
 
 #define LEFT_SERVO_PIN  9   // Servo 1 (Left Arm)
@@ -44,8 +44,7 @@ float currentServoAngle  = ARM_DOWN_ANGLE;
 float targetServoAngle   = ARM_DOWN_ANGLE;
 float armSpeed           = 1.5;  // Smooth gliding speed
 
-// Set to 'true' if servos are mounted facing opposite directions (standard)
-// This makes BOTH arms raise UP together at the same time!
+// Set to 'true' so both arms raise UP together in unison!
 const bool MIRROR_RIGHT_ARM = true;
 
 // ----------------------------------------------------------------------------
@@ -86,6 +85,38 @@ int currentRoutine = 0;
 // ----------------------------------------------------------------------------
 // 4. DRAWING THE FACES ON THE OLED SCREEN
 // ----------------------------------------------------------------------------
+
+// Welcome Splash Screen: Shows "WELCOME" and a big happy Smiley Face!
+void showWelcomeSmiley() {
+  display.clearDisplay();
+
+  // Decorative border box
+  display.drawRoundRect(2, 2, 124, 60, 4, SSD1306_WHITE);
+
+  // Big Happy Smiley Face (Centered at X=42, Y=32)
+  display.drawCircle(40, 32, 22, SSD1306_WHITE); // Face contour
+  display.fillCircle(33, 26, 3, SSD1306_WHITE);  // Left eye
+  display.fillCircle(47, 26, 3, SSD1306_WHITE);  // Right eye
+
+  // Big Smile Arc
+  display.drawCircle(40, 33, 12, SSD1306_WHITE);
+  display.fillRect(26, 20, 28, 13, SSD1306_BLACK); // Keep bottom smile arc
+
+  // Welcome Text on the right
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(70, 18);
+  display.println(F("HI!"));
+  
+  display.setTextSize(1);
+  display.setCursor(70, 38);
+  display.println(F("WELCOME"));
+
+  display.display();
+  delay(2500); // Show welcome message for 2.5 seconds
+}
+
+// Draw the real-time animated cartoon face
 void drawFace() {
   display.clearDisplay();
 
@@ -99,7 +130,7 @@ void drawFace() {
     return;
   }
 
-  // --- HAPPY FACE: Cute upward smiling eyes! ---
+  // --- HAPPY FACE: Cute upward smiling eyes + smile mouth! ---
   if (currentEmotion == EMO_HAPPY) {
     display.fillRoundRect(LEFT_EYE_X, EYE_Y, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
     display.fillCircle(LEFT_EYE_X + EYE_WIDTH / 2, EYE_Y + EYE_HEIGHT + 6, EYE_WIDTH / 1.5, SSD1306_BLACK);
@@ -107,7 +138,7 @@ void drawFace() {
     display.fillRoundRect(RIGHT_EYE_X, EYE_Y, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
     display.fillCircle(RIGHT_EYE_X + EYE_WIDTH / 2, EYE_Y + EYE_HEIGHT + 6, EYE_WIDTH / 1.5, SSD1306_BLACK);
 
-    // Little cute smile
+    // Cute smile mouth in the middle
     display.drawCircle(64, 48, 8, SSD1306_WHITE);
     display.fillRect(54, 40, 20, 8, SSD1306_BLACK);
   }
@@ -119,14 +150,14 @@ void drawFace() {
     display.fillCircle(LEFT_EYE_X + EYE_WIDTH / 2 + gazeOffsetX, EYE_Y + EYE_HEIGHT / 2 + gazeOffsetY, 7, SSD1306_BLACK);
     display.fillCircle(RIGHT_EYE_X + EYE_WIDTH / 2 + gazeOffsetX, EYE_Y + EYE_HEIGHT / 2 + gazeOffsetY, 7, SSD1306_BLACK);
 
-    display.drawCircle(64, 52, 4, SSD1306_WHITE);
+    display.drawCircle(64, 52, 4, SSD1306_WHITE); // "o" mouth
   }
   // --- NORMAL / IDLE FACE: Classic adorable robot eyes ---
   else {
     display.fillRoundRect(LEFT_EYE_X + gazeOffsetX, EYE_Y + gazeOffsetY, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
     display.fillRoundRect(RIGHT_EYE_X + gazeOffsetX, EYE_Y + gazeOffsetY, EYE_WIDTH, EYE_HEIGHT, EYE_CORNER_RAD, SSD1306_WHITE);
 
-    // Shiny light reflection dot in eyes
+    // Shiny reflection dot
     display.fillCircle(LEFT_EYE_X + gazeOffsetX + 6, EYE_Y + gazeOffsetY + 7, 3, SSD1306_BLACK);
     display.fillCircle(RIGHT_EYE_X + gazeOffsetX + 6, EYE_Y + gazeOffsetY + 7, 3, SSD1306_BLACK);
   }
@@ -138,9 +169,8 @@ void drawFace() {
 // 5. UPDATE FUNCTIONS (Smooth Movement)
 // ----------------------------------------------------------------------------
 
-// Moves BOTH servos smoothly toward target angle
 void updateArms() {
-  if (millis() - lastArmUpdateTime >= 20) { // 50Hz smooth updates
+  if (millis() - lastArmUpdateTime >= 20) {
     lastArmUpdateTime = millis();
 
     if (abs(currentServoAngle - targetServoAngle) > 0.5) {
@@ -153,7 +183,6 @@ void updateArms() {
       }
 
       int leftAngle = (int)currentServoAngle;
-      // Mirror the right arm so both raise UP together!
       int rightAngle = MIRROR_RIGHT_ARM ? (180 - leftAngle) : leftAngle;
 
       leftServo.write(leftAngle);
@@ -162,7 +191,6 @@ void updateArms() {
   }
 }
 
-// Natural eye blinking
 void updateBlinking() {
   unsigned long now = millis();
 
@@ -181,7 +209,6 @@ void updateBlinking() {
   }
 }
 
-// High-level synchronized robot behavior
 void updateRobotBehavior() {
   unsigned long now = millis();
 
@@ -190,7 +217,7 @@ void updateRobotBehavior() {
     currentRoutine = (currentRoutine + 1) % 4;
 
     switch (currentRoutine) {
-      // 0: Arms Resting Down + Robot looking straight ahead (Normal)
+      // 0: Arms Resting Down + Looking straight
       case 0:
         targetServoAngle = ARM_DOWN_ANGLE;
         armSpeed = 1.2;
@@ -199,16 +226,16 @@ void updateRobotBehavior() {
         gazeOffsetY = 0;
         break;
 
-      // 1: Robot raises BOTH arms in the air! Face turns Super HAPPY! 🙌
+      // 1: Both arms raise UP in the air! Face turns Super HAPPY! 🙌
       case 1:
         targetServoAngle = ARM_UP_ANGLE;
         armSpeed = 2.0;
         currentEmotion = EMO_HAPPY;
         gazeOffsetX = 0;
-        gazeOffsetY = -2; // Looking up proudly!
+        gazeOffsetY = -2;
         break;
 
-      // 2: Robot swings arms halfway & looks surprised to the LEFT! 😲
+      // 2: Arms hold halfway & robot looks surprised to the LEFT! 😲
       case 2:
         targetServoAngle = 75;
         armSpeed = 2.8;
@@ -242,15 +269,10 @@ void setup() {
     for (;;);
   }
 
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(20, 28);
-  display.println(F("HELLO FRIEND!"));
-  display.display();
-  delay(1200);
+  // 2. Show the Welcome Smiley Screen!
+  showWelcomeSmiley();
 
-  // 2. Attach Both Servos
+  // 3. Attach Both Servos
   leftServo.attach(LEFT_SERVO_PIN);
   rightServo.attach(RIGHT_SERVO_PIN);
 
