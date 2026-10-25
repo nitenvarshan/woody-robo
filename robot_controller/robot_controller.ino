@@ -42,6 +42,7 @@ Servo rightServo;
 enum FaceMode {
   FACE_ORGANIC_ROBOT, // Default: Lifelike moving eyes, wink & hearts!
   FACE_TEXT_INTRO,    // "HELLO, I AM WOODY - BATCH 4 TEAM"
+  FACE_HAIII,         // "HAIII! I SEE YOU!" (Triggered by IR sensor!)
   FACE_CREEPER,       // Minecraft Creeper
   FACE_HEROBRINE      // Glowing Herobrine
 };
@@ -240,6 +241,77 @@ void drawIntroTextScreen() {
         if (col == 4 || col == 123) b = 0xFF;
       } else if (p == 7) {
         if (col >= 4 && col <= 123) b = 0x80;
+        if (col == 4 || col == 123) b = 0xFF;
+      } else if (col == 4 || col == 123) {
+        b = 0xFF;
+      }
+
+      const char* curText = NULL;
+      int textLen = 0;
+
+      if (p == 1) { curText = line1; textLen = sizeof(line1) - 1; }
+      else if (p == 3) { curText = line2; textLen = sizeof(line2) - 1; }
+      else if (p == 5) { curText = line3; textLen = sizeof(line3) - 1; }
+      else if (p == 6) { curText = line4; textLen = sizeof(line4) - 1; }
+
+      if (curText != NULL) {
+        int totalWidth = textLen * 6;
+        int startX = (128 - totalWidth) / 2;
+
+        if (col >= startX && col < startX + totalWidth) {
+          int relX = col - startX;
+          int charIdx = relX / 6;
+          int fontCol = relX % 6;
+
+          if (fontCol < 5) {
+            char c = curText[charIdx];
+            if (c >= ' ' && c <= 'Z') {
+              uint8_t fontData = pgm_read_byte(&FONT5x7[c - ' '][fontCol]);
+              b |= fontData;
+            }
+          }
+        }
+      }
+
+      if (col % 16 == 0) {
+        Wire.endTransmission();
+        Wire.beginTransmission(OLED_I2C_ADDR);
+        Wire.write(0x40);
+      }
+      Wire.write(b);
+    }
+    Wire.endTransmission();
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 6B. SCREEN: "HAIII! I SEE YOU!" (Triggered by IR Sensor Hand Detection!)
+// ----------------------------------------------------------------------------
+
+void drawHaiiiScreen() {
+  const char line1[] = "HAIII!";
+  const char line2[] = "I SEE YOU!";
+  const char line3[] = "MADE BY";
+  const char line4[] = "BATCH 4 TEAM";
+
+  for (uint8_t p = 0; p < 8; p++) {
+    Wire.beginTransmission(OLED_I2C_ADDR);
+    Wire.write(0x00);
+    Wire.write(0xB0 + p);
+    Wire.write(0x02);
+    Wire.write(0x10);
+    Wire.endTransmission();
+
+    for (uint8_t col = 0; col < 128; col++) {
+      uint8_t b = 0x00;
+
+      // Sparkling border
+      uint8_t sparkle = (millis() / 180) % 2;
+      if (p == 0) {
+        if (col >= 4 && col <= 123) b = (col % 2 == sparkle) ? 0x03 : 0x00;
+        if (col == 4 || col == 123) b = 0xFF;
+      } else if (p == 7) {
+        if (col >= 4 && col <= 123) b = (col % 2 == sparkle) ? 0xC0 : 0x00;
         if (col == 4 || col == 123) b = 0xFF;
       } else if (col == 4 || col == 123) {
         b = 0xFF;
@@ -745,16 +817,16 @@ void checkIrSensor() {
   if (isDetected && !lastIrDetected) {
     lastIrDetected = true;
     irTriggerTime = millis();
-    currentFace = FACE_ORGANIC_ROBOT;
-    currentMood = MOOD_HEART;        // HUGE Glowing Beating Hearts! ❤️❤️
-    targetServoAngle = ARM_UP_ANGLE;  // Swing both arms UP in excitement! 🙌
+    currentFace = FACE_HAIII;        // 📺 DISPLAY "HAIII! I SEE YOU!" SCREEN!
+    targetServoAngle = ARM_UP_ANGLE;  // Both arms swing UP in excitement! 🙌
     armSpeed = 3.2;
-    Serial.println(F("\n👋 [IR SENSOR]: Hand detected! Woody says Hello with BIG HEARTS! ❤️🙌"));
+    Serial.println(F("\n👋 [IR SENSOR DETECTED]: >>> HAIII! I SEE YOU! <<< ❤️🙌"));
   }
   else if (!isDetected && lastIrDetected) {
-    // Hold greeting for at least 1.5 seconds so it feels natural
-    if (millis() - irTriggerTime >= 1500) {
+    // Hold "HAIII!" greeting for at least 2 seconds so it is clearly readable
+    if (millis() - irTriggerTime >= 2000) {
       lastIrDetected = false;
+      currentFace = FACE_ORGANIC_ROBOT;
       currentMood = MOOD_NORMAL;
       targetServoAngle = ARM_DOWN_ANGLE;
       armSpeed = 1.6;
@@ -810,6 +882,12 @@ void checkSerialCommands() {
       currentFace = FACE_TEXT_INTRO;
       introStartTime = millis();
       Serial.println(F("\n📺 [DISPLAY]: Showing 'HELLO, I AM WOODY - BATCH 4 TEAM' Screen!"));
+    }
+    else if (cmd == "HAI" || cmd == "HI" || cmd == "HAIII") {
+      currentFace = FACE_HAIII;
+      irTriggerTime = millis();
+      targetServoAngle = ARM_UP_ANGLE;
+      Serial.println(F("\n👋 [DISPLAY]: Showing 'HAIII! I SEE YOU!' Screen!"));
     }
     else if (cmd == "3" || cmd == "ROBOT") {
       currentFace = FACE_ORGANIC_ROBOT;
@@ -960,6 +1038,8 @@ void loop() {
     lastOledDraw = millis();
     if (currentFace == FACE_TEXT_INTRO) {
       drawIntroTextScreen();
+    } else if (currentFace == FACE_HAIII) {
+      drawHaiiiScreen();
     } else {
       renderFastScreen();
     }
