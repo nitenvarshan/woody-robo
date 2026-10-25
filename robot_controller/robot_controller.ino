@@ -856,7 +856,7 @@ void checkIrSensor() {
 
 void printCommandMenu() {
   Serial.println(F("\n========================================================"));
-  Serial.println(F("   🤖 WOODY THE ROBOT - BATCH 4 TEAM COMMAND CENTER 🤖"));
+  Serial.println(F("   🤖 WOODY THE ROBOT - BATCH 4 TEAM (9600 BAUD) 🤖"));
   Serial.println(F("========================================================"));
   Serial.println(F("  [DEFAULT STORY SEQUENCE ACTIVE]"));
   Serial.println(F("    1. Moving Eyeballs Left/Right + Blinking Naturally"));
@@ -889,6 +889,11 @@ void checkSerialCommands() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
     cmd.toUpperCase();
+    if (cmd.length() == 0) return;
+
+    Serial.print(F("\n>>> [COMMAND RECEIVED]: '"));
+    Serial.print(cmd);
+    Serial.println(F("'"));
 
     if (cmd == "?" || cmd == "HELP" || cmd == "MENU") {
       printCommandMenu();
@@ -896,30 +901,38 @@ void checkSerialCommands() {
     else if (cmd == "T" || cmd == "INTRO" || cmd == "HELLO" || cmd == "WOODY") {
       currentFace = FACE_TEXT_INTRO;
       introStartTime = millis();
-      Serial.println(F("\n📺 [DISPLAY]: Showing 'HELLO, I AM WOODY - BATCH 4 TEAM' Screen!"));
+      Serial.println(F("📺 [DISPLAY]: Showing 'HELLO, I AM WOODY - BATCH 4 TEAM' Screen!"));
     }
     else if (cmd == "HAI" || cmd == "HI" || cmd == "HAIII") {
       currentFace = FACE_HAIII;
       irTriggerTime = millis();
       targetServoAngle = ARM_UP_ANGLE;
-      Serial.println(F("\n👋 [DISPLAY]: Showing 'HAIII! I SEE YOU!' Screen!"));
+      Serial.println(F("👋 [DISPLAY]: Showing 'HAIII! I SEE YOU!' Screen!"));
     }
-    else if (cmd == "IR OFF" || cmd == "IOFF" || cmd == "IR 0" || cmd == "I0") {
+    else if (cmd == "IR OFF" || cmd == "IOFF" || cmd == "IR 0" || cmd == "I0" || cmd == "OFF" || cmd == "IROFF") {
       irSensorEnabled = false;
       lastIrDetected = false;
-      Serial.println(F("\n🚫 [IR SENSOR]: DISABLED! (Now you can freely use 'U' and 'D' without interference)"));
+      if (currentFace == FACE_HAIII) {
+        currentFace = FACE_ORGANIC_ROBOT;
+        currentMood = MOOD_NORMAL;
+      }
+      Serial.println(F("🚫 [IR SENSOR]: DISABLED! Manual U/D controls are now 100% active."));
     }
-    else if (cmd == "IR ON" || cmd == "ION" || cmd == "IR 1" || cmd == "I1") {
+    else if (cmd == "IR ON" || cmd == "ION" || cmd == "IR 1" || cmd == "I1" || cmd == "ON" || cmd == "IRON") {
       irSensorEnabled = true;
-      Serial.println(F("\n✅ [IR SENSOR]: ENABLED! (Active hand detection resumed)"));
+      Serial.println(F("✅ [IR SENSOR]: ENABLED! Hand detection active."));
     }
     else if (cmd == "IR") {
       irSensorEnabled = !irSensorEnabled;
       if (irSensorEnabled) {
-        Serial.println(F("\n✅ [IR SENSOR]: ENABLED! (Active hand detection resumed)"));
+        Serial.println(F("✅ [IR SENSOR]: ENABLED! Hand detection active."));
       } else {
         lastIrDetected = false;
-        Serial.println(F("\n🚫 [IR SENSOR]: DISABLED! (Now you can freely use 'U' and 'D' without interference)"));
+        if (currentFace == FACE_HAIII) {
+          currentFace = FACE_ORGANIC_ROBOT;
+          currentMood = MOOD_NORMAL;
+        }
+        Serial.println(F("🚫 [IR SENSOR]: DISABLED! Manual U/D controls are now 100% active."));
       }
     }
     else if (cmd == "3" || cmd == "ROBOT") {
@@ -956,14 +969,16 @@ void checkSerialCommands() {
       isStopped = true;
       autoDanceMode = false;
       calibrationMode = false;
+      lastIrDetected = false;
       targetServoAngle = currentServoAngle;
-      Serial.println(F("\n🛑 [MOTION STOPPED / FROZEN] 🛑"));
+      Serial.println(F("🛑 [MOTION STOPPED / FROZEN] 🛑"));
     }
     else if (cmd == "C") {
       isStopped = false;
       calibrationMode = true;
       autoDanceMode = false;
-      Serial.println(F("\n>>> [CALIBRATION MODE: Holding at 90 deg] <<<"));
+      lastIrDetected = false;
+      Serial.println(F(">>> [CALIBRATION MODE: Holding at 90 deg] <<<"));
     }
     else if (cmd == "L+") {
       leftOffset++;
@@ -982,6 +997,8 @@ void checkSerialCommands() {
       isStopped = false;
       calibrationMode = false;
       autoDanceMode = false;
+      lastIrDetected = false;
+      if (currentFace == FACE_HAIII) currentFace = FACE_ORGANIC_ROBOT;
       targetServoAngle = ARM_UP_ANGLE;
       currentMood = MOOD_HAPPY;
       Serial.println(F("[COMMAND] Arms UP & Happy! 🙌"));
@@ -990,6 +1007,8 @@ void checkSerialCommands() {
       isStopped = false;
       calibrationMode = false;
       autoDanceMode = false;
+      lastIrDetected = false;
+      if (currentFace == FACE_HAIII) currentFace = FACE_ORGANIC_ROBOT;
       targetServoAngle = ARM_DOWN_ANGLE;
       currentMood = MOOD_NORMAL;
       Serial.println(F("[COMMAND] Arms DOWN! 👇"));
@@ -1022,7 +1041,8 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
 
-  Serial.begin(115200);
+  Serial.begin(9600); // Standard 9600 baud (matches Arduino IDE default!)
+  Serial.setTimeout(50); // Fast 50ms timeout so commands respond immediately
   printCommandMenu();
 
   // 1. Initialize Servos
