@@ -1,12 +1,13 @@
 /*
  * ============================================================================
- *   MINECRAFT CREEPER ROBOT (WITH LIVE DUAL-ARM CALIBRATION!)
+ *   MINECRAFT CREEPER ROBOT (WITH LIVE CALIBRATION & STOP COMMAND!)
  * ============================================================================
  *   Interactive Commands in Serial Monitor (115200 baud):
+ *     - 'S'   = STOP / FREEZE (Instantly halts all arm motion!) 🛑
  *     - 'C'   = CALIBRATION MODE (Locks both arms at 90° to align horns!)
  *     - 'U'   = Both Arms UP! 🙌
  *     - 'D'   = Both Arms DOWN! 👇
- *     - 'W'   = Auto Dance / Wave Mode! 👋
+ *     - 'W'   = RESUME Auto Dance / Wave Mode! 👋
  *     - 'L+' / 'L-' = Fine-tune Left arm by 1 degree
  *     - 'R+' / 'R-' = Fine-tune Right arm by 1 degree
  * ============================================================================
@@ -26,7 +27,6 @@ Servo rightServo;
 // ----------------------------------------------------------------------------
 // 1. CALIBRATION OFFSETS & ANGLES
 // ----------------------------------------------------------------------------
-// Fine-tune offsets (adjust if one arm is slightly higher than the other!)
 int leftOffset  = 0;
 int rightOffset = 0;
 
@@ -40,6 +40,7 @@ float armSpeed           = 2.0;
 const bool MIRROR_RIGHT_ARM = true;
 bool autoDanceMode = true;
 bool calibrationMode = false;
+bool isStopped = false;
 
 // Timing clocks
 unsigned long lastArmUpdateTime = 0;
@@ -156,17 +157,20 @@ void drawCreeperFace(int shiftX, int shiftY, bool blinking) {
 }
 
 // ----------------------------------------------------------------------------
-// 3. SYNCHRONIZED ARMS WITH OFFSETS
+// 3. SYNCHRONIZED ARMS WITH OFFSETS & STOP
 // ----------------------------------------------------------------------------
 
 void updateArms() {
   if (calibrationMode) {
-    // In Calibration mode, hold solid 90 degrees + offsets!
     int leftCalib  = constrain(90 + leftOffset, 0, 180);
     int rightCalib = constrain((MIRROR_RIGHT_ARM ? (180 - 90) : 90) + rightOffset, 0, 180);
     leftServo.write(leftCalib);
     rightServo.write(rightCalib);
     return;
+  }
+
+  if (isStopped) {
+    return; // Freeze in current position!
   }
 
   if (millis() - lastArmUpdateTime >= 20) {
@@ -210,7 +214,7 @@ void updateBlinking() {
 }
 
 void updateRobotBehavior() {
-  if (!autoDanceMode || calibrationMode) return;
+  if (!autoDanceMode || calibrationMode || isStopped) return;
 
   unsigned long now = millis();
 
@@ -256,18 +260,27 @@ void checkSerialCommands() {
     cmd.trim();
     cmd.toUpperCase();
 
-    // 1. Calibration Mode (Lock at 90°)
-    if (cmd == "C") {
+    // 1. EMERGENCY STOP / FREEZE MOTION!
+    if (cmd == "S" || cmd == "STOP") {
+      isStopped = true;
+      autoDanceMode = false;
+      calibrationMode = false;
+      targetServoAngle = currentServoAngle;
+      Serial.println(F("\n🛑 [MOTION STOPPED / FROZEN] 🛑"));
+      Serial.println(F("Arms are frozen in their current position."));
+      Serial.println(F("Type 'W' to resume auto-dance, or 'U'/'D' to move arms.\n"));
+    }
+    // 2. Calibration Mode (Lock at 90°)
+    else if (cmd == "C") {
+      isStopped = false;
       calibrationMode = true;
       autoDanceMode = false;
       Serial.println(F("\n>>> [CALIBRATION MODE ACTIVATED] <<<"));
-      Serial.println(F("Both servos are now holding at exactly 90 degrees (Horizontal)."));
-      Serial.println(F("Attach your wooden arms/horns so they are perfectly aligned!"));
-      Serial.println(F("Type 'L+' or 'L-' to trim Left arm by 1 deg."));
-      Serial.println(F("Type 'R+' or 'R-' to trim Right arm by 1 deg."));
-      Serial.println(F("Type 'W' to exit calibration and dance!\n"));
+      Serial.println(F("Both servos are holding at exactly 90 degrees."));
+      Serial.println(F("Type 'L+' / 'L-' or 'R+' / 'R-' to trim offsets."));
+      Serial.println(F("Type 'W' to resume dancing!\n"));
     }
-    // 2. Left Arm Fine Trim
+    // 3. Left Arm Fine Trim
     else if (cmd == "L+") {
       leftOffset++;
       Serial.print(F("Left Offset: ")); Serial.println(leftOffset);
@@ -275,7 +288,7 @@ void checkSerialCommands() {
       leftOffset--;
       Serial.print(F("Left Offset: ")); Serial.println(leftOffset);
     }
-    // 3. Right Arm Fine Trim
+    // 4. Right Arm Fine Trim
     else if (cmd == "R+") {
       rightOffset++;
       Serial.print(F("Right Offset: ")); Serial.println(rightOffset);
@@ -283,28 +296,32 @@ void checkSerialCommands() {
       rightOffset--;
       Serial.print(F("Right Offset: ")); Serial.println(rightOffset);
     }
-    // 4. Arms UP
+    // 5. Arms UP
     else if (cmd == "U") {
+      isStopped = false;
       calibrationMode = false;
       autoDanceMode = false;
       targetServoAngle = ARM_UP_ANGLE;
       Serial.println(F("[COMMAND] Arms UP! 🙌"));
     }
-    // 5. Arms DOWN
+    // 6. Arms DOWN
     else if (cmd == "D") {
+      isStopped = false;
       calibrationMode = false;
       autoDanceMode = false;
       targetServoAngle = ARM_DOWN_ANGLE;
       Serial.println(F("[COMMAND] Arms DOWN! 👇"));
     }
-    // 6. Auto Wave
+    // 7. Auto Wave / Resume
     else if (cmd == "W") {
+      isStopped = false;
       calibrationMode = false;
       autoDanceMode = true;
       Serial.println(F("[COMMAND] Auto Dance / Wave Mode ON! 👋"));
     }
-    // 7. Custom Degree
+    // 8. Custom Degree
     else if (cmd.toInt() > 0 || cmd == "0") {
+      isStopped = false;
       calibrationMode = false;
       autoDanceMode = false;
       int angle = constrain(cmd.toInt(), 0, 180);
@@ -325,9 +342,12 @@ void setup() {
 
   Serial.begin(115200);
   Serial.println(F("\n============================================="));
-  Serial.println(F("   MINECRAFT CREEPER ROBOT (CALIBRATION READY)"));
-  Serial.println(F("   Type 'C' in Serial Monitor to Calibrate!"));
-  Serial.println(F("   Type 'U' = Up, 'D' = Down, 'W' = Wave"));
+  Serial.println(F("   MINECRAFT CREEPER ROBOT READY! 🤖"));
+  Serial.println(F("   Commands:"));
+  Serial.println(F("     'S' = STOP / FREEZE ARMS! 🛑"));
+  Serial.println(F("     'C' = Calibrate at 90 deg"));
+  Serial.println(F("     'U' = Arms UP  |  'D' = Arms DOWN"));
+  Serial.println(F("     'W' = Resume Auto Dance / Wave"));
   Serial.println(F("=============================================\n"));
 
   // 1. Initialize Servos
