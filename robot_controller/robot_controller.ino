@@ -1,12 +1,12 @@
 /*
  * ============================================================================
  *   WOODY THE ROBOT COMPANION - MADE BY BATCH 4 TEAM 🤖🎓✨
- *   Continuous Choreographed Story Animation (DEFAULT ON BOOT!)
+ *   Continuous Choreographed Story Animation (WITH BIG GLOWING HEARTS! ❤️❤️)
  * ============================================================================
  *   Continuous Animation Loop:
  *     1. Organic Eyeballs Glance Left & Right while Blinking naturally
  *     2. Smooth Cheeky One-Eye Wink 😉
- *     3. BOTH Eyes Turn into Glowing Hearts ❤️❤️ + Both Arms Swing UP! 🙌
+ *     3. BOTH Eyes Turn into HUGE GLOWING HEARTS ❤️❤️ + Arms Swing UP! 🙌
  *     4. Repeats seamlessly forever!
  *
  *   Interactive Serial Commands (115200 baud):
@@ -16,7 +16,7 @@
  *     - '2' or 'HEROBRINE'-> Glowing Herobrine Face 👻
  *     - 'S'              -> Emergency STOP / Freeze Arms 🛑
  *     - 'W'              -> Resume Animation Loop 👋
- *     - 'U' / 'D'        -> Manual Arms UP / DOWN
+ *     - 'U' / 'D'        -> Arms UP / DOWN
  *     - 'C'              -> Calibration Mode (Locks at 90°) 🎯
  *     - '?' or 'HELP'    -> Show full command menu
  * ============================================================================
@@ -47,11 +47,11 @@ enum RobotMood {
   MOOD_NORMAL,        // Natural glancing eyeballs
   MOOD_HAPPY,         // Happy crescent eyes + smile + blush
   MOOD_WINK,          // Smooth animated wink 😉
-  MOOD_HEART,         // Glowing heart eyes in BOTH eyes ❤️❤️
+  MOOD_HEART,         // HUGE glowing heart eyes in BOTH eyes ❤️❤️
   MOOD_SURPRISED      // Wide alert dilated eyes 😲
 };
 
-FaceMode currentFace = FACE_TEXT_INTRO; // Shows Batch 4 Intro for 3s on boot, then starts story loop!
+FaceMode currentFace = FACE_TEXT_INTRO; // Shows Batch 4 Intro for 3.5s, then starts story loop!
 RobotMood currentMood = MOOD_NORMAL;
 
 // ----------------------------------------------------------------------------
@@ -158,7 +158,7 @@ float targetPupilY = 0.0;
 
 // Continuous Eyelid Blink Engine
 float blinkProgress = 0.0;
-int blinkDirection = 0; // 0 = idle, 1 = closing, -1 = opening
+int blinkDirection = 0;
 bool doubleBlinkQueued = false;
 unsigned long lastBlinkTime = 0;
 unsigned long nextBlinkInterval = 2800;
@@ -277,22 +277,29 @@ void drawIntroTextScreen() {
 }
 
 // ----------------------------------------------------------------------------
-// 7. ULTRA-LIFELIKE ORGANIC EYEBALLS + WINK + GLOWING HEARTS
+// 7. HUGE 39x40 PIXEL GLOWING CARTOON HEARTS (Full Face Sockets!)
 // ----------------------------------------------------------------------------
 
 void triggerSmoothWink() {
   currentFace = FACE_ORGANIC_ROBOT;
   currentMood = MOOD_WINK;
   winkProgress = 0.0;
-  winkDirection = 1; // Smoothly glide shut!
+  winkDirection = 1;
 }
 
-// 14x14 Glowing Heart Pixel Map
-const uint16_t HEART_BITMAP[14] PROGMEM = {
-  0b00110000110000, 0b01111001111000, 0b11111111111100, 0b11111111111100,
-  0b11111111111100, 0b11111111111100, 0b01111111111000, 0b00111111110000,
-  0b00011111100000, 0b00001111000000, 0b00000110000000, 0b00000000000000,
-  0b00000000000000, 0b00000000000000
+// 40-Row Symmetric Plump Cartoon Heart Table (Half-Spans in PROGMEM)
+const uint8_t BIG_HEART_IN[40] PROGMEM = {
+  9, 4, 3, 2, 1, 1, 1, 1, 1, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+const uint8_t BIG_HEART_OUT[40] PROGMEM = {
+  10, 14, 15, 16, 17, 18, 18, 18, 19, 19,
+  19, 19, 18, 18, 17, 17, 16, 16, 15, 15,
+  14, 14, 13, 13, 12, 11, 11, 10,  9,  9,
+   8,  7,  6,  6,  5,  4,  3,  2,  1,  0
 };
 
 void renderFastScreen() {
@@ -308,7 +315,6 @@ void renderFastScreen() {
   int eyeHalfW = 14; // Sclera width = 28px
   int eyeHalfH = (currentMood == MOOD_SURPRISED) ? 19 : 17; // Sclera height = 34px
 
-  // Dynamic Eyelid closures
   int leftLidHalfH  = map(curBlink, 0, 100, eyeHalfH, 2);
   int rightLidHalfH = map(max(curBlink, curWink), 0, 100, eyeHalfH, 2);
   if (leftLidHalfH < 2) leftLidHalfH = 2;
@@ -316,7 +322,6 @@ void renderFastScreen() {
 
   for (uint8_t p = 0; p < 8; p++) {
     int pageTopY = p * 8;
-    int pageBotY = pageTopY + 7;
 
     Wire.beginTransmission(OLED_I2C_ADDR);
     Wire.write(0x00);
@@ -329,30 +334,60 @@ void renderFastScreen() {
       uint8_t pixelByte = 0x00;
 
       // ======================================================================
-      // 1. ORGANIC EYEBALLS WITH GLOWING HEARTS & SMOOTH WINK
+      // 1. ORGANIC EYEBALLS WITH HUGE GLOWING HEARTS
       // ======================================================================
       if (currentFace == FACE_ORGANIC_ROBOT) {
 
-        // --- GLOWING HEART EYES IN BOTH EYES! ❤️❤️ ---
+        // --- HUGE 39x40 GLOWING CARTOON HEARTS IN BOTH EYES! ❤️❤️ ---
         if (currentMood == MOOD_HEART) {
-          int relLX = col - (leftCenterX - 7);
-          int relRX = col - (rightCenterX - 7);
-          int heartX = -1;
-          if (relLX >= 0 && relLX < 14) heartX = relLX;
-          else if (relRX >= 0 && relRX < 14) heartX = relRX;
+          // Heartbeat pulse rhythm: thump-thump ... thump-thump
+          unsigned long pulseTime = millis() % 850;
+          bool isPulsing = (pulseTime < 140) || (pulseTime > 240 && pulseTime < 380);
+          int heartTopY = isPulsing ? 5 : 6;
 
-          if (heartX >= 0) {
+          // Check Left Eye (center col 36) and Right Eye (center col 92)
+          int dxL = abs(col - 36);
+          int dxR = abs(col - 92);
+          int dx = -1;
+          int curHeartCenterX = 0;
+
+          if (dxL <= 19) {
+            dx = dxL;
+            curHeartCenterX = 36;
+          } else if (dxR <= 19) {
+            dx = dxR;
+            curHeartCenterX = 92;
+          }
+
+          if (dx >= 0) {
             for (uint8_t bit = 0; bit < 8; bit++) {
               int y = pageTopY + bit;
-              int relY = y - (eyeCenterY - 7);
-              if (relY >= 0 && relY < 14) {
-                uint16_t row = pgm_read_word(&HEART_BITMAP[relY]);
-                if (row & (1 << (13 - heartX))) pixelByte |= (1 << bit);
+              int relY = y - heartTopY;
+
+              if (relY >= 0 && relY < 40) {
+                uint8_t xIn  = pgm_read_byte(&BIG_HEART_IN[relY]);
+                uint8_t xOut = pgm_read_byte(&BIG_HEART_OUT[relY]);
+
+                // Expand by 1px during rhythmic heartbeat pulse!
+                if (isPulsing && relY > 0) {
+                  xOut = min(20, xOut + 1);
+                  if (xIn > 0) xIn--;
+                }
+
+                if (dx >= xIn && dx <= xOut) {
+                  // Cute glossy shine specular reflection in top-left lobe of both hearts!
+                  int relXFromCenter = col - curHeartCenterX;
+                  bool isShine = (relXFromCenter >= -12 && relXFromCenter <= -8 && relY >= 5 && relY <= 8);
+
+                  if (!isShine) {
+                    pixelByte |= (1 << bit);
+                  }
+                }
               }
             }
           }
         }
-        // --- REALISTIC EYEBALLS (Moving Pupil + Eyelid Blinking) ---
+        // --- REALISTIC MOVING EYEBALLS ---
         else {
           bool inLeftX  = (col >= leftCenterX - eyeHalfW && col <= leftCenterX + eyeHalfW);
           bool inRightX = (col >= rightCenterX - eyeHalfW && col <= rightCenterX + eyeHalfW);
@@ -400,7 +435,6 @@ void renderFastScreen() {
               for (uint8_t bit = 0; bit < 8; bit++) {
                 int y = pageTopY + bit;
 
-                // Inside the eyelid aperture
                 if (y >= curTopY && y <= curBotY) {
                   bool cornerCut = false;
                   if (curEyeBlink < 80) {
@@ -413,12 +447,10 @@ void renderFastScreen() {
                   }
 
                   if (!cornerCut) {
-                    // Check if inside moving pupil
                     int pdx = col - pupCenterX;
                     int pdy = y - pupCenterY;
                     bool isPupil = (pdx*pdx + pdy*pdy <= pupRadiusSq);
 
-                    // Dual Glossy Light Reflections
                     bool isSparkle = false;
                     if (curEyeBlink < 25) {
                       if (col >= curCenterX + 3 && col <= curCenterX + 6 && y >= eyeCenterY - 11 && y <= eyeCenterY - 8) {
@@ -430,10 +462,9 @@ void renderFastScreen() {
                     }
 
                     if (isSparkle) {
-                      // Light sparkle
+                      // Sparkle
                     } else if (isPupil) {
-                      // Dark pupil
-                      continue;
+                      continue; // Dark pupil
                     }
                     pixelByte |= (1 << bit);
                   }
@@ -448,14 +479,11 @@ void renderFastScreen() {
           int y = pageTopY + bit;
 
           if (currentMood == MOOD_HAPPY || currentMood == MOOD_HEART) {
-            // Big happy smile
             int dx = col - 64; int dy = y - 48;
             int r2 = dx*dx + dy*dy;
             if (r2 <= 49 && r2 >= 25 && y >= 49) pixelByte |= (1 << bit);
-            // Cute pink blushing cheeks under both eyes
             if (y == 44 && ((col >= 22 && col <= 26) || (col >= 102 && col <= 106))) pixelByte |= (1 << bit);
           } else if (currentMood == MOOD_WINK || winkProgress > 20) {
-            // Cheeky Smirk
             if (y == 51 && col >= 62 && col <= 72) pixelByte |= (1 << bit);
             if (y == 50 && col == 73) pixelByte |= (1 << bit);
             if (y == 44 && col >= 102 && col <= 106) pixelByte |= (1 << bit);
@@ -464,7 +492,6 @@ void renderFastScreen() {
             int r2 = dx*dx + dy*dy;
             if (r2 <= 20 && r2 >= 8) pixelByte |= (1 << bit);
           } else {
-            // Gentle resting smile
             if (y == 52 && col >= 60 && col <= 68) pixelByte |= (1 << bit);
             if (y == 51 && (col == 59 || col == 69)) pixelByte |= (1 << bit);
           }
@@ -535,11 +562,10 @@ void renderFastScreen() {
 void updateEyePhysics() {
   unsigned long now = millis();
 
-  // 1. Organic Pupil Glancing (Smooth Spring Physics toward Target)
   pupilX += (targetPupilX - pupilX) * 0.22;
   pupilY += (targetPupilY - pupilY) * 0.22;
 
-  // 2. Smooth Animated Wink Physics
+  // Smooth Animated Wink Physics
   if (winkDirection == 1) {
     winkProgress += 14.0;
     if (winkProgress >= 100.0) {
@@ -549,7 +575,7 @@ void updateEyePhysics() {
     }
   } else if (winkDirection == 2) {
     if (now - winkHoldTimer >= 500) {
-      winkDirection = -1; // Smoothly open back up!
+      winkDirection = -1;
     }
   } else if (winkDirection == -1) {
     winkProgress -= 16.0;
@@ -560,11 +586,11 @@ void updateEyePhysics() {
     }
   }
 
-  // 3. Natural Eyelid Blinking (Active even while pupils move!)
+  // Natural Eyelid Blinking
   if (blinkDirection == 0 && (now - lastBlinkTime > nextBlinkInterval)) {
     if (winkDirection == 0 && currentMood != MOOD_HEART) {
       blinkDirection = 1;
-      doubleBlinkQueued = (random(0, 10) < 3); // 30% chance for double-blink
+      doubleBlinkQueued = (random(0, 10) < 3);
     }
   }
 
@@ -592,7 +618,7 @@ void updateEyePhysics() {
 }
 
 // ----------------------------------------------------------------------------
-// 9. CONTINUOUS CHOREOGRAPHED STORY ANIMATION (DEFAULT!)
+// 9. CONTINUOUS CHOREOGRAPHED STORY ANIMATION
 // ----------------------------------------------------------------------------
 
 void updateArms() {
@@ -631,7 +657,6 @@ void updateArms() {
 void updateStoryChoreography() {
   unsigned long now = millis();
 
-  // Initial Intro text screen for 3.5 seconds
   if (currentFace == FACE_TEXT_INTRO) {
     if (now - introStartTime > 3500) {
       currentFace = FACE_ORGANIC_ROBOT;
@@ -641,18 +666,16 @@ void updateStoryChoreography() {
     return;
   }
 
-  // If user paused or manually controlled, hold
   if (!autoDanceMode || calibrationMode || isStopped) return;
 
   // The Continuous Choreographed Story:
-  // Step 0: Glance Left & Blink naturally (2.5s)
-  // Step 1: Glance Right & Blink naturally (2.5s)
-  // Step 2: Smooth Playful Wink 😉 (2.5s)
-  // Step 3: Glowing Heart Eyes ❤️❤️ + Both Arms Swing UP! 🙌 (3.5s)
+  // Step 0: Glance Left & Blink naturally (2.6s)
+  // Step 1: Glance Right & Blink naturally (2.6s)
+  // Step 2: Smooth Playful Wink 😉 (2.6s)
+  // Step 3: HUGE GLOWING HEARTS ❤️❤️ + Both Arms Swing UP! 🙌 (3.6s)
   // Repeat seamlessly!
 
   if (storyStep == 0) {
-    // Phase 1A: Look Left while blinking naturally
     if (now - storyStepTimer >= 2600) {
       storyStep = 1;
       storyStepTimer = now;
@@ -664,43 +687,39 @@ void updateStoryChoreography() {
     }
   }
   else if (storyStep == 1) {
-    // Phase 1B: Look Right while blinking naturally
     if (now - storyStepTimer >= 2600) {
       storyStep = 2;
       storyStepTimer = now;
-      targetPupilX = 0;  // Center eyes
+      targetPupilX = 0;
       targetPupilY = 0;
-      targetServoAngle = 80; // Arms midway
+      targetServoAngle = 80;
       armSpeed = 2.2;
-      triggerSmoothWink(); // Trigger Wink! 😉
+      triggerSmoothWink();
       Serial.println(F("[STORY] Smooth Playful Wink! 😉"));
     }
   }
   else if (storyStep == 2) {
-    // Phase 2: Wink holds and opens
     if (now - storyStepTimer >= 2600) {
       storyStep = 3;
       storyStepTimer = now;
       currentFace = FACE_ORGANIC_ROBOT;
-      currentMood = MOOD_HEART; // BOTH EYES GLOWING HEARTS! ❤️❤️
+      currentMood = MOOD_HEART; // HUGE GLOWING HEARTS! ❤️❤️
       targetPupilX = 0;
       targetPupilY = 0;
-      targetServoAngle = ARM_UP_ANGLE; // ARMS UP IN THE AIR! 🙌
+      targetServoAngle = ARM_UP_ANGLE; // ARMS UP! 🙌
       armSpeed = 2.5;
-      Serial.println(F("[STORY] GLOWING HEART EYES ❤️❤️ + ARMS UP! 🙌"));
+      Serial.println(F("[STORY] HUGE GLOWING HEARTS ❤️❤️ + ARMS UP! 🙌"));
     }
   }
   else if (storyStep == 3) {
-    // Phase 3: Celebrate with Heart eyes and Arms UP
     if (now - storyStepTimer >= 3600) {
-      // Loop back to Step 0!
       storyStep = 0;
       storyStepTimer = now;
       currentFace = FACE_ORGANIC_ROBOT;
       currentMood = MOOD_NORMAL;
       targetPupilX = -6; // Look Left!
       targetPupilY = 0;
-      targetServoAngle = ARM_DOWN_ANGLE; // Arms lower to rest
+      targetServoAngle = ARM_DOWN_ANGLE;
       armSpeed = 1.6;
       Serial.println(F("[STORY] Glancing Left while Blinking"));
     }
@@ -718,14 +737,14 @@ void printCommandMenu() {
   Serial.println(F("  [DEFAULT STORY SEQUENCE ACTIVE]"));
   Serial.println(F("    1. Moving Eyeballs Left/Right + Blinking Naturally"));
   Serial.println(F("    2. Playful One-Eye Wink 😉"));
-  Serial.println(F("    3. Glowing Heart Eyes in BOTH Eyes ❤️❤️ + Arms UP! 🙌"));
+  Serial.println(F("    3. HUGE GLOWING HEARTS in BOTH Eyes ❤️❤️ + Arms UP! 🙌"));
   Serial.println(F("    (Loops continuously!)"));
   Serial.println(F(""));
   Serial.println(F("  [COMMANDS]"));
   Serial.println(F("    'T' or 'INTRO'   -> Replay 'HELLO, I AM WOODY BATCH 4' Screen"));
   Serial.println(F("    '3' or 'ROBOT'   -> Resume Default Story Animation"));
   Serial.println(F("    'K' or 'WINK'    -> Instant Animated Wink 😉"));
-  Serial.println(F("    'H' or 'HEART'   -> Instant Heart Eyes ❤️❤️"));
+  Serial.println(F("    'H' or 'HEART'   -> Instant HUGE Heart Eyes ❤️❤️"));
   Serial.println(F("    'O' or 'WOW'     -> Surprised Alert Eyes 😲"));
   Serial.println(F("    '1' or 'CREEPER' -> 1:1 Pixel Minecraft Creeper 🟩"));
   Serial.println(F("    '2' or 'HEROBRINE'-> Glowing Herobrine Face 👻"));
@@ -766,7 +785,7 @@ void checkSerialCommands() {
     else if (cmd == "H" || cmd == "HEART") {
       currentFace = FACE_ORGANIC_ROBOT;
       currentMood = MOOD_HEART;
-      Serial.println(F("\n💖 [EXPRESSION]: Glowing Heart Eyes in BOTH eyes! ❤️❤️"));
+      Serial.println(F("\n💖 [EXPRESSION]: HUGE Glowing Heart Eyes in BOTH eyes! ❤️❤️"));
     }
     else if (cmd == "O" || cmd == "WOW" || cmd == "SURPRISED") {
       currentFace = FACE_ORGANIC_ROBOT;
@@ -870,7 +889,7 @@ void setup() {
   drawIntroTextScreen();
 
   lastBlinkTime = millis();
-  targetPupilX = -6; // Start by glancing left
+  targetPupilX = -6;
 }
 
 void loop() {
