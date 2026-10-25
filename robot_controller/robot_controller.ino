@@ -182,6 +182,7 @@ unsigned long lastArmUpdateTime = 0;
 unsigned long lastOledDraw = 0;
 
 // IR Sensor State
+bool irSensorEnabled = true; // Set to false via 'IR OFF' command
 bool lastIrDetected = false;
 unsigned long irTriggerTime = 0;
 unsigned long irDetectStartTime = 0;
@@ -812,6 +813,8 @@ void updateStoryChoreography() {
 // ----------------------------------------------------------------------------
 
 void checkIrSensor() {
+  if (!irSensorEnabled) return; // Temporarily disabled to avoid interfering with manual controls!
+
   bool rawReading = (digitalRead(IR_SENSOR_PIN) == LOW);
   unsigned long now = millis();
 
@@ -862,6 +865,8 @@ void printCommandMenu() {
   Serial.println(F("    (Loops continuously!)"));
   Serial.println(F(""));
   Serial.println(F("  [IR SENSOR DETECT]: Wave hand in front -> Instant HUGE Hearts & Arms UP! 🙌"));
+  Serial.println(F("    'IR OFF' / 'IR ON'-> Temporarily disable/enable IR sensor (no U/D interference)"));
+  Serial.println(F("    'IR'              -> Toggle IR sensor ON / OFF"));
   Serial.println(F(""));
   Serial.println(F("  [COMMANDS]"));
   Serial.println(F("    'T' or 'INTRO'   -> Replay 'HELLO, I AM WOODY BATCH 4' Screen"));
@@ -898,6 +903,24 @@ void checkSerialCommands() {
       irTriggerTime = millis();
       targetServoAngle = ARM_UP_ANGLE;
       Serial.println(F("\n👋 [DISPLAY]: Showing 'HAIII! I SEE YOU!' Screen!"));
+    }
+    else if (cmd == "IR OFF" || cmd == "IOFF" || cmd == "IR 0" || cmd == "I0") {
+      irSensorEnabled = false;
+      lastIrDetected = false;
+      Serial.println(F("\n🚫 [IR SENSOR]: DISABLED! (Now you can freely use 'U' and 'D' without interference)"));
+    }
+    else if (cmd == "IR ON" || cmd == "ION" || cmd == "IR 1" || cmd == "I1") {
+      irSensorEnabled = true;
+      Serial.println(F("\n✅ [IR SENSOR]: ENABLED! (Active hand detection resumed)"));
+    }
+    else if (cmd == "IR") {
+      irSensorEnabled = !irSensorEnabled;
+      if (irSensorEnabled) {
+        Serial.println(F("\n✅ [IR SENSOR]: ENABLED! (Active hand detection resumed)"));
+      } else {
+        lastIrDetected = false;
+        Serial.println(F("\n🚫 [IR SENSOR]: DISABLED! (Now you can freely use 'U' and 'D' without interference)"));
+      }
     }
     else if (cmd == "3" || cmd == "ROBOT") {
       currentFace = FACE_ORGANIC_ROBOT;
