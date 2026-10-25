@@ -1,12 +1,22 @@
 /*
  * ============================================================================
- *   BUTTERY-SMOOTH ANIMATED ROBOT (400kHz I2C + 40 FPS FAST ENGINE!) 🤖⚡✨
+ *   BUTTERY-SMOOTH ANIMATED ROBOT (WITH FLUID ANIMATED WINK!) 🤖😉✨
  * ============================================================================
- *   Optimizations:
- *     - 400 kHz High-Speed I2C Bus (Instant 4x transmission boost!)
- *     - 100% Pure Integer Math (Zero floating-point CPU lag!)
- *     - Pre-Computed Column Bitmasks (< 1ms CPU render time!)
- *     - Sub-Pixel Easing on Eye Movement & Silk-Smooth Eyelid Glides
+ *   Interactive Serial Commands (115200 baud):
+ *     - 'K' or 'WINK'      = Smooth Animated One-Eye Wink! 😉
+ *     - 'H' or 'HEART'     = Glowing Heart Eyes! ❤️
+ *     - 'O' or 'SURPRISED' = Surprised Wide Eyes! 😲
+ *     - '3' or 'ROBOT'     = Cute Cartoon Robot Eyes! 🤖 (Default)
+ *     - '1' or 'CREEPER'   = 1:1 Pixel Minecraft Creeper! 🟩
+ *     - '2' or 'HEROBRINE' = Glowing Herobrine Face! 👻
+ *
+ *     - 'S'   = STOP / FREEZE ARMS! 🛑
+ *     - 'W'   = RESUME Auto-Dance / Wave! 👋
+ *     - 'U'   = Both Arms UP! 🙌
+ *     - 'D'   = Both Arms DOWN! 👇
+ *     - 'C'   = Calibration Mode (Locks at 90°) 🎯
+ *     - 'L+' / 'L-' = Left arm trim
+ *     - 'R+' / 'R-' = Right arm trim
  * ============================================================================
  */
 
@@ -76,12 +86,17 @@ bool isStopped = false;
 float eyeShiftX = 0.0;
 float eyeTargetShiftX = 0.0;
 
-// Eyelid blink: 0 = wide open, 100 = fully closed
+// Symmetrical double-eye blink
 float blinkProgress = 0.0;
 int blinkDirection = 0; // 0 = idle, 1 = closing, -1 = opening
 bool doubleBlinkQueued = false;
 unsigned long lastBlinkTime = 0;
 unsigned long nextBlinkInterval = 3000;
+
+// Independent Animated Wink Engine (Right Eye)
+float winkProgress = 0.0;       // 0 = open, 100 = full cheeky wink
+int winkDirection = 0;          // 0 = idle, 1 = closing, 2 = holding, -1 = opening
+unsigned long winkHoldTimer = 0;
 
 // Timers
 unsigned long lastArmUpdateTime = 0;
@@ -102,7 +117,7 @@ void sendSH1106Command(uint8_t cmd) {
 
 void initSH1106() {
   Wire.begin();
-  Wire.setClock(400000); // ⚡ 400 kHz FAST I2C BUS! (4x faster than standard!)
+  Wire.setClock(400000); // 400 kHz Fast I2C Bus!
   #if defined(WIRE_HAS_TIMEOUT)
     Wire.setWireTimeout(25000, true);
   #endif
@@ -120,10 +135,9 @@ void initSH1106() {
 }
 
 // ----------------------------------------------------------------------------
-// 5. ULTRA-OPTIMIZED RENDERER (< 2ms CPU Time!)
+// 5. ULTRA-OPTIMIZED RENDERER WITH SMOOTH WINKING
 // ----------------------------------------------------------------------------
 
-// Fast integer 14x14 Heart Bitmap
 const uint16_t HEART_BITMAP[14] PROGMEM = {
   0b00110000110000,
   0b01111001111000,
@@ -141,22 +155,33 @@ const uint16_t HEART_BITMAP[14] PROGMEM = {
   0b00000000000000
 };
 
+void triggerSmoothWink() {
+  currentFace = FACE_COOL_ROBOT;
+  currentMood = MOOD_WINK;
+  winkProgress = 0.0;
+  winkDirection = 1; // Start smoothly squeezing shut!
+}
+
 void renderFastScreen() {
   int shiftInt = (int)round(eyeShiftX);
   int curBlink = (int)round(blinkProgress);
+  int curWink  = (int)round(winkProgress);
 
-  // Pre-calculate eye bounds
   int leftEyeCenterX = 38 + shiftInt;
   int rightEyeCenterX = 90 + shiftInt;
   int eyeCenterY = 28;
 
   int eyeHalfW = (currentMood == MOOD_SURPRISED) ? 15 : 13;
   int eyeFullH = (currentMood == MOOD_SURPRISED) ? 38 : 34;
-  int eyeHalfH = map(curBlink, 0, 100, eyeFullH / 2, 2);
-  if (eyeHalfH < 2) eyeHalfH = 2;
 
-  int eyeTopY = eyeCenterY - eyeHalfH;
-  int eyeBotY = eyeCenterY + eyeHalfH;
+  // Left Eye Height (controlled by normal blink)
+  int leftHalfH = map(curBlink, 0, 100, eyeFullH / 2, 2);
+  if (leftHalfH < 2) leftHalfH = 2;
+
+  // Right Eye Height (affected by normal blink OR smooth wink!)
+  int effectiveRightBlink = max(curBlink, curWink);
+  int rightHalfH = map(effectiveRightBlink, 0, 100, eyeFullH / 2, 2);
+  if (rightHalfH < 2) rightHalfH = 2;
 
   for (uint8_t p = 0; p < 8; p++) {
     int pageTopY = p * 8;
@@ -165,7 +190,7 @@ void renderFastScreen() {
     Wire.beginTransmission(OLED_I2C_ADDR);
     Wire.write(0x00);
     Wire.write(0xB0 + p);
-    Wire.write(0x02); // SH1106 Column offset
+    Wire.write(0x02);
     Wire.write(0x10);
     Wire.endTransmission();
 
@@ -206,13 +231,18 @@ void renderFastScreen() {
           if (inLeftX || inRightX) {
             bool isRightEye = inRightX;
             int curCenterX = isRightEye ? rightEyeCenterX : leftEyeCenterX;
+            int curHalfH   = isRightEye ? rightHalfH : leftHalfH;
+            int curTopY    = eyeCenterY - curHalfH;
+            int curBotY    = eyeCenterY + curHalfH;
+            int curEyeBlink = isRightEye ? effectiveRightBlink : curBlink;
 
-            // WINK: Right eye is a cute wink curve
-            if (currentMood == MOOD_WINK && isRightEye) {
+            // SMOOTH WINK: When right eye is fully or mostly squeezed, draw a thick cute smile curve!
+            if (isRightEye && curWink >= 75) {
               int dx = col - curCenterX;
-              int targetY = eyeCenterY + 2 + (dx * dx) / 28;
+              int targetY = eyeCenterY + 2 + (dx * dx) / 26; // Smooth arc curve
               for (uint8_t bit = 0; bit < 8; bit++) {
                 int y = pageTopY + bit;
+                // 3-pixel thick soft cartoon line
                 if (abs(y - targetY) <= 1) pixelByte |= (1 << bit);
               }
             }
@@ -229,7 +259,7 @@ void renderFastScreen() {
                 }
               }
             }
-            // NORMAL & SURPRISED: Fast filled box with rounded corners
+            // NORMAL & SURPRISED & GLIDING WINK: Fluid easing capsule
             else {
               int dx = abs(col - curCenterX);
               int distFromEdgeX = eyeHalfW - dx;
@@ -237,11 +267,11 @@ void renderFastScreen() {
               for (uint8_t bit = 0; bit < 8; bit++) {
                 int y = pageTopY + bit;
 
-                if (y >= eyeTopY && y <= eyeBotY) {
+                if (y >= curTopY && y <= curBotY) {
                   bool cornerCut = false;
-                  // Smooth rounded corners
-                  if (curBlink < 80) {
-                    int distFromEdgeY = min(y - eyeTopY, eyeBotY - y);
+                  // Rounded corners
+                  if (curEyeBlink < 80) {
+                    int distFromEdgeY = min(y - curTopY, curBotY - y);
                     if (distFromEdgeX < 4 && distFromEdgeY < 4) {
                       int cx = 4 - distFromEdgeX;
                       int cy = 4 - distFromEdgeY;
@@ -252,7 +282,7 @@ void renderFastScreen() {
                   if (!cornerCut) {
                     bool isSparkle = false;
                     // Dual Sparkles (Disney gloss)
-                    if (curBlink < 25) {
+                    if (curEyeBlink < 25) {
                       // Big sparkle
                       if (col >= curCenterX + 3 && col <= curCenterX + 6 && y >= eyeCenterY - 11 && y <= eyeCenterY - 8) {
                         isSparkle = true;
@@ -270,21 +300,22 @@ void renderFastScreen() {
           }
         }
 
-        // --- CUTE MOUTHS & BLUSH (Fast Integer checks) ---
+        // --- CUTE MOUTHS & BLUSH ---
         for (uint8_t bit = 0; bit < 8; bit++) {
           int y = pageTopY + bit;
 
           if (currentMood == MOOD_HAPPY || currentMood == MOOD_HEART) {
             // Smile Arc
-            int dx = col - 64;
-            int dy = y - 48;
+            int dx = col - 64; int dy = y - 48;
             int r2 = dx*dx + dy*dy;
             if (r2 <= 49 && r2 >= 25 && y >= 49) pixelByte |= (1 << bit);
             // Rosy Blushing Cheeks
             if (y == 44 && ((col >= 22 && col <= 26) || (col >= 102 && col <= 106))) pixelByte |= (1 << bit);
-          } else if (currentMood == MOOD_WINK) {
+          } else if (currentMood == MOOD_WINK || winkProgress > 20) {
+            // Cheeky Smirk for the Wink!
             if (y == 51 && col >= 62 && col <= 72) pixelByte |= (1 << bit);
             if (y == 50 && col == 73) pixelByte |= (1 << bit);
+            if (y == 44 && col >= 102 && col <= 106) pixelByte |= (1 << bit); // Right cheek blush!
           } else if (currentMood == MOOD_SURPRISED) {
             int dx = col - 64; int dy = y - 51;
             int r2 = dx*dx + dy*dy;
@@ -343,7 +374,6 @@ void renderFastScreen() {
         }
       }
 
-      // Send 16-byte I2C chunk
       if (col % 16 == 0) {
         Wire.endTransmission();
         Wire.beginTransmission(OLED_I2C_ADDR);
@@ -356,7 +386,7 @@ void renderFastScreen() {
 }
 
 // ----------------------------------------------------------------------------
-// 6. CONTINUOUS INTERPOLATED BLINKING & GLANCING (Silk-Smooth!)
+// 6. CONTINUOUS INTERPOLATED BLINKING & WINK PHYSICS
 // ----------------------------------------------------------------------------
 
 void updateEyePhysics() {
@@ -365,29 +395,55 @@ void updateEyePhysics() {
   // 1. Smooth Spring Easing for Glancing Left/Right
   eyeShiftX += (eyeTargetShiftX - eyeShiftX) * 0.25;
 
-  // 2. Trigger Next Blink Timer
-  if (blinkDirection == 0 && (now - lastBlinkTime > nextBlinkInterval)) {
-    blinkDirection = 1; // Start closing
-    doubleBlinkQueued = (random(0, 10) < 3); // 30% chance for double-blink
+  // 2. Continuous Fluid Wink Physics (Right Eye)
+  if (winkDirection == 1) {
+    // Squeezing closed smoothly!
+    winkProgress += 14.0;
+    if (winkProgress >= 100.0) {
+      winkProgress = 100.0;
+      winkDirection = 2; // Hold the wink for a playful moment!
+      winkHoldTimer = now;
+    }
+  } else if (winkDirection == 2) {
+    // Hold wink for 450 milliseconds
+    if (now - winkHoldTimer >= 450) {
+      winkDirection = -1; // Smoothly open back up!
+    }
+  } else if (winkDirection == -1) {
+    // Opening back up!
+    winkProgress -= 16.0;
+    if (winkProgress <= 0.0) {
+      winkProgress = 0.0;
+      winkDirection = 0; // Done winking!
+      currentMood = MOOD_NORMAL;
+    }
   }
 
-  // 3. Fluid Eyelid Movement (Closing & Opening)
+  // 3. Normal Symmetrical Blinking Machine
+  if (blinkDirection == 0 && (now - lastBlinkTime > nextBlinkInterval)) {
+    // Don't blink if currently winking
+    if (winkDirection == 0) {
+      blinkDirection = 1;
+      doubleBlinkQueued = (random(0, 10) < 3);
+    }
+  }
+
   if (blinkDirection == 1) {
-    blinkProgress += 18.0; // Smooth 5-step close
+    blinkProgress += 18.0;
     if (blinkProgress >= 100.0) {
       blinkProgress = 100.0;
-      blinkDirection = -1; // Reverse: Start opening
+      blinkDirection = -1;
     }
   } else if (blinkDirection == -1) {
-    blinkProgress -= 16.0; // Smooth pop open
+    blinkProgress -= 16.0;
     if (blinkProgress <= 0.0) {
       blinkProgress = 0.0;
-      blinkDirection = 0; // Back to idle
+      blinkDirection = 0;
       lastBlinkTime = now;
 
       if (doubleBlinkQueued) {
         doubleBlinkQueued = false;
-        nextBlinkInterval = 100; // Immediate second blink!
+        nextBlinkInterval = 100;
       } else {
         nextBlinkInterval = random(2500, 5000);
       }
@@ -470,8 +526,8 @@ void updateRobotBehavior() {
         targetServoAngle = 100;
         armSpeed = 2.0;
         eyeTargetShiftX = 3;
-        currentMood = MOOD_WINK;
-        Serial.println(F("[ROBOT] Playful Wink! 😉"));
+        triggerSmoothWink(); // Smooth Animated Wink! 😉
+        Serial.println(F("[ROBOT] Playful Animated Wink! 😉"));
         break;
 
       case 4:
@@ -495,15 +551,15 @@ void checkSerialCommands() {
     cmd.trim();
     cmd.toUpperCase();
 
-    if (cmd == "H" || cmd == "HEART") {
+    // --- INSTANT EXPRESSION COMMANDS ---
+    if (cmd == "K" || cmd == "WINK") {
+      triggerSmoothWink();
+      Serial.println(F("\n😉 [EXPRESSION]: Smooth Animated Wink!"));
+    }
+    else if (cmd == "H" || cmd == "HEART") {
       currentFace = FACE_COOL_ROBOT;
       currentMood = MOOD_HEART;
       Serial.println(F("\n💖 [EXPRESSION]: Glowing Heart Eyes! ❤️"));
-    }
-    else if (cmd == "K" || cmd == "WINK") {
-      currentFace = FACE_COOL_ROBOT;
-      currentMood = MOOD_WINK;
-      Serial.println(F("\n😉 [EXPRESSION]: Playful Cheeky Wink!"));
     }
     else if (cmd == "O" || cmd == "SURPRISED") {
       currentFace = FACE_COOL_ROBOT;
@@ -523,6 +579,8 @@ void checkSerialCommands() {
       currentFace = FACE_HEROBRINE;
       Serial.println(F("\n👻 [FACE]: Spooky Glowing Herobrine Face!"));
     }
+
+    // --- ARM MOTION COMMANDS ---
     else if (cmd == "S" || cmd == "STOP") {
       isStopped = true;
       autoDanceMode = false;
@@ -593,8 +651,8 @@ void setup() {
 
   Serial.begin(115200);
   Serial.println(F("\n============================================="));
-  Serial.println(F("   BUTTERY-SMOOTH ANIMATED ROBOT READY! 🤖⚡"));
-  Serial.println(F("   400 kHz Fast I2C Bus Active"));
+  Serial.println(F("   BUTTERY-SMOOTH ANIMATED ROBOT READY! 🤖✨"));
+  Serial.println(F("   Type 'K' or 'WINK' for Smooth Wink! 😉"));
   Serial.println(F("=============================================\n"));
 
   // 1. Initialize Servos
@@ -620,14 +678,14 @@ void loop() {
   // 2. Process Commands
   checkSerialCommands();
 
-  // 3. Fluid Eye Interpolation & Physics
+  // 3. Fluid Eye Interpolation & Wink Physics
   updateEyePhysics();
 
   // 4. Update Arm Positions
   updateArms();
   updateRobotBehavior();
 
-  // 5. Render Screen at Buttery-Smooth ~35 FPS (every 28ms!)
+  // 5. Render Screen at 35+ FPS
   if (millis() - lastOledDraw >= 28) {
     lastOledDraw = millis();
     renderFastScreen();
