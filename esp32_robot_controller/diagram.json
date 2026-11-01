@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "author": "Woody Robot Companion",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 30, "left": 0, "attrs": {} },
+    { "type": "board-ssd1306", "id": "oled", "top": -140, "left": 40, "attrs": { "i2cAddress": "0x3c" } },
+    { "type": "wokwi-servo", "id": "servoLeft", "top": 180, "left": -220, "attrs": {} },
+    { "type": "wokwi-servo", "id": "servoRight", "top": 180, "left": 220, "attrs": {} },
+    { "type": "wokwi-pushbutton", "id": "irSensor", "top": -60, "left": -120, "attrs": { "color": "green", "label": "Hand Wave IR" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "esp:GND.1", "oled:GND", "black", [ "v0" ] ],
+    [ "esp:3V3", "oled:VCC", "red", [ "v0" ] ],
+    [ "esp:21", "oled:SDA", "blue", [ "v0" ] ],
+    [ "esp:22", "oled:SCL", "yellow", [ "v0" ] ],
+    [ "esp:GND.2", "servoLeft:GND", "black", [ "v0" ] ],
+    [ "esp:5V", "servoLeft:V+", "red", [ "v0" ] ],
+    [ "esp:18", "servoLeft:PWM", "orange", [ "v0" ] ],
+    [ "esp:GND.2", "servoRight:GND", "black", [ "v0" ] ],
+    [ "esp:5V", "servoRight:V+", "red", [ "v0" ] ],
+    [ "esp:19", "servoRight:PWM", "orange", [ "v0" ] ],
+    [ "esp:GND.1", "irSensor:1.l", "black", [ "v0" ] ],
+    [ "esp:14", "irSensor:2.l", "green", [ "v0" ] ]
+  ],
+  "dependencies": {
+    "madhephaestus/ESP32Servo": "3.0.6"
+  }
+}

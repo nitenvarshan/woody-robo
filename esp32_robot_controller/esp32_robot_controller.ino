@@ -52,12 +52,13 @@
 #define RIGHT_SERVO_PIN 19
 #define IR_SENSOR_PIN   14    // Must be powered at 3.3V!
 
-// Bluetooth Availability Check
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-#error Bluetooth is not enabled in this ESP32 core!
+// Bluetooth Availability Check (Gracefully enabled when supported)
+#if defined(CONFIG_BT_ENABLED) && defined(CONFIG_BLUEDROID_ENABLED)
+  #define HAS_BLUETOOTH 1
+  BluetoothSerial SerialBT;
+#else
+  #define HAS_BLUETOOTH 0
 #endif
-
-BluetoothSerial SerialBT;
 WebServer server(80);
 
 Servo leftServo;
@@ -773,7 +774,9 @@ void updateIrSensor() {
     setSyncTarget(ARM_UP_ANGLE, 3.2);
 
     Serial.println(F("[IR] 🖐️ Hand Wave Detected! Heart Eyes + Arms UP! ❤️🙌"));
+    #if HAS_BLUETOOTH
     SerialBT.println(F("[IR] 🖐️ Hand Wave Detected! Heart Eyes + Arms UP! ❤️🙌"));
+    #endif
   } else if (!isNear && lastIrDetected) {
     if (now - irDetectStartTime > 1500) {
       lastIrDetected = false;
@@ -1091,9 +1094,11 @@ void setup() {
   Serial.println(F("[BOOT] Shoulder IR Sensor (GPIO 14)... OK"));
 
   // 4. Bluetooth Serial Bring-Up
+  #if HAS_BLUETOOTH
   Serial.print(F("[BOOT] Starting Bluetooth Serial ('Woody-Robot')... "));
   SerialBT.begin("Woody-Robot");
   Serial.println(F("READY!"));
+  #endif
 
   // 5. Wi-Fi SoftAP & Web Dashboard Bring-Up
   Serial.print(F("[BOOT] Starting Wi-Fi SoftAP ('Woody-Robot')... "));
@@ -1131,12 +1136,14 @@ void loop() {
   }
 
   // 3. Check Bluetooth App Input (Phone)
+  #if HAS_BLUETOOTH
   if (SerialBT.available()) {
     String cmd = SerialBT.readStringUntil('\n');
     Serial.print(F("[BT RECV] "));
     Serial.println(cmd);
     processCommand(cmd, SerialBT);
   }
+  #endif
 
   // 4. Update Hardware Subsystems
   updateServos();
