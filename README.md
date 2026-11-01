@@ -27,6 +27,14 @@
 ---
 
 ## 🚀 How to Run
+
+### Option 1: Friend Edition (2 Servos + IR Sensor, No OLED)
+- Location: [friend_robot_controller.ino](file:///c:/Users/niten_2e/OneDrive/Desktop/Test-1/friend_robot_controller/friend_robot_controller.ino)
+- **Zero external libraries needed!** Just open and upload.
+- Runs 100% autonomously in a continuous loop with interactive hand-wave IR detection.
+- See [Friend Edition Guide](file:///c:/Users/niten_2e/OneDrive/Desktop/Test-1/friend_robot_controller/README.md) for wiring details.
+
+### Option 2: Full Edition (OLED Face + 2 Servos + IR + Serial Commands)
 1. Open the Arduino IDE.
 2. Go to **Sketch** ➡️ **Include Library** ➡️ **Manage Libraries...**
 3. Install:
@@ -34,3 +42,30 @@
    - `Adafruit SSD1306`
 4. Open [robot_controller.ino](robot_controller/robot_controller.ino).
 5. Select **Arduino Uno** and your COM Port, then click **Upload** (➡️ arrow button)!
+
+---
+
+### Option 3: ESP32 DevKit V1 Upgrade (Bluetooth Phone App + Dual-Servo Sync) 🚀📱
+Upgrade Woody from the Arduino Uno to the **30-pin ESP32 DevKit V1** for wireless smartphone control and hardware-timed jitter-free servo motion.
+
+- **Location:** [`esp32_robot_controller/esp32_robot_controller.ino`](esp32_robot_controller/esp32_robot_controller.ino)
+- **Detailed Guide:** [`esp32_robot_controller/README.md`](esp32_robot_controller/README.md)
+
+#### ✨ What the ESP32 Upgrade Adds:
+- **Bluetooth Phone App Control:** Pairs with your phone via Bluetooth (`Woody-Robot`). Keep your mobile data/Wi-Fi active while controlling Woody with instant one-tap buttons (`U`=Arms UP, `D`=Arms DOWN, `W`=Wave, `G`=Giga Chad, `H`=Heart Eyes).
+- **Dual-Servo Synchronization & Alignment Fix:**
+  - **Back-to-Back Mirroring:** Automatically mirrors the right arm (`180 - angle`) so both arms swing forward and up in unison. Can be toggled on-the-fly by sending `M`.
+  - **One-Touch Horn Calibration (`C`):** Locks both motors at $90.0^\circ$ so you can pull the horns off and seat them pointing straight down without jamming.
+  - **Smooth Motion Easing:** Moves arms at $2.2^\circ$/frame to eliminate 1.2A+ power spikes and protect wooden joints.
+- **Autonomous Alive Loop:** Continuous natural blinking, glancing eyeballs, animated winking, and shoulder IR hand-wave detection.
+
+#### 🔌 ESP32 Wiring Quick Reference:
+| Component | ESP32 Pin | Power Rail |
+| :--- | :--- | :--- |
+| **OLED (I2C)** | `GPIO 21` (SDA) / `GPIO 22` (SCL) | ESP32 `3V3` + GND |
+| **Left Arm Servo** | `GPIO 18` | **5.0V External Buck Rail** + GND |
+| **Right Arm Servo** | `GPIO 19` | **5.0V External Buck Rail** + GND |
+| **Shoulder IR Sensor** | `GPIO 14` | ESP32 `3V3` (⚠️ Do NOT use 5V!) |
+| **ESP32 Power** | `VIN` | **5.0V Buck Output** + Common GND |
+
+

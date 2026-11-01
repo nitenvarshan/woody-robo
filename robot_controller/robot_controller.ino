@@ -9,15 +9,19 @@
  *     3. BOTH Eyes Turn into HUGE GLOWING HEARTS ❤️❤️ + Arms Swing UP! 🙌
  *     4. Repeats seamlessly forever!
  *
- *   Interactive Serial Commands (115200 baud):
+ *   Interactive Serial Commands (9600 baud):
  *     - 'T' or 'INTRO'   -> Show Batch 4 Team Intro Screen
  *     - '3' or 'ROBOT'   -> Resume Default Story Animation
  *     - '1' or 'CREEPER' -> 1:1 Pixel Minecraft Creeper 🟩
  *     - '2' or 'HEROBRINE'-> Glowing Herobrine Face 👻
  *     - 'S'              -> Emergency STOP / Freeze Arms 🛑
- *     - 'W'              -> Resume Animation Loop 👋
- *     - 'U' / 'D'        -> Arms UP / DOWN
- *     - 'C'              -> Calibration Mode (Locks at 90°) 🎯
+ *     - 'W'              -> Resume Story Animation Loop 👋
+ *     - 'U' / 'D'        -> Both Arms UP / DOWN in sync 🙌
+ *     - 'L <angle>'      -> Test Left Arm only (e.g. 'L 90')
+ *     - 'R <angle>'      -> Test Right Arm only (e.g. 'R 90')
+ *     - 'TEST'           -> Step-by-step diagnostic test of each servo
+ *     - 'M'              -> Toggle Mirror Mode (for back-to-back vs side-by-side) 🔄
+ *     - 'C'              -> Calibration Mode (Locks both at 90°) 🎯
  *     - '?' or 'HELP'    -> Show full command menu
  * ============================================================================
  */
@@ -30,8 +34,8 @@
 #define RIGHT_SERVO_PIN 10
 #define LED_PIN         13
 #define IR_SENSOR_PIN   2   // Signal OUT pin from IR Obstacle Sensor
-#define IR_GND_PIN      3   // Pure 0V Ground pin for IR sensor (so you don't need to share GND!)
-#define IR_POWER_PIN    4   // Pure 5V VCC power pin for IR sensor (if 5V headers are full)
+#define IR_GND_PIN      3   // Ground pin for direct-plug sensor (0V)
+#define IR_POWER_PIN    4   // 5V VCC power pin for direct-plug sensor
 
 Servo leftServo;
 Servo rightServo;
@@ -42,7 +46,6 @@ Servo rightServo;
 enum FaceMode {
   FACE_ORGANIC_ROBOT, // Default: Lifelike moving eyes, wink & hearts!
   FACE_TEXT_INTRO,    // "HELLO, I AM WOODY - BATCH 4 TEAM"
-  FACE_HAIII,         // "HAIII! I SEE YOU!" (Triggered by IR sensor!)
   FACE_CREEPER,       // Minecraft Creeper
   FACE_HEROBRINE      // Glowing Herobrine
 };
@@ -52,10 +55,11 @@ enum RobotMood {
   MOOD_HAPPY,         // Happy crescent eyes + smile + blush
   MOOD_WINK,          // Smooth animated wink 😉
   MOOD_HEART,         // HUGE glowing heart eyes in BOTH eyes ❤️❤️
-  MOOD_SURPRISED      // Wide alert dilated eyes 😲
+  MOOD_SURPRISED,     // Wide alert dilated eyes 😲
+  MOOD_GIGACHAD       // 😎 Ultra Confident Giga Chad Wink & Smirk!
 };
 
-FaceMode currentFace = FACE_TEXT_INTRO; // Shows Batch 4 Intro for 3.5s, then starts story loop!
+FaceMode currentFace = FACE_ORGANIC_ROBOT; // Default: Lifelike moving eyes & story animation loop!
 RobotMood currentMood = MOOD_NORMAL;
 
 // ----------------------------------------------------------------------------
@@ -135,22 +139,33 @@ const uint8_t HEROBRINE_MAP[8] PROGMEM = {
 };
 
 // ----------------------------------------------------------------------------
-// 3. MOTION & CALIBRATION SETTINGS
+// 3. SYNCHRONIZED SERVO MOTION SETTINGS
 // ----------------------------------------------------------------------------
 int leftOffset  = 0;
 int rightOffset = 0;
 
-const int ARM_DOWN_ANGLE = 25;
-const int ARM_UP_ANGLE   = 130;
+// Arm Angle Limits (Degrees: 0 to 180)
+const int ARM_DOWN_ANGLE = 25;    // Rest position (both arms down at sides)
+const int ARM_MID_ANGLE  = 75;    // Mid-level gesture
+const int ARM_UP_ANGLE   = 135;   // Fully raised (victory celebration / high-five)
 
+// Both arms share the exact same synchronized master angle coordinate!
 float currentServoAngle  = ARM_DOWN_ANGLE;
 float targetServoAngle   = ARM_DOWN_ANGLE;
-float armSpeed           = 2.2;
+float armSpeed           = 2.4;   // Proven 2.4°/frame smooth speed
 
-const bool MIRROR_RIGHT_ARM = true;
-bool autoDanceMode = true;
-bool calibrationMode = false;
-bool isStopped = false;
+// Both servos take identical angle values (e.g. 25° DOWN, 135° UP):
+// Left motor on -X axis, Right motor on +X axis oriented to rotate in matching direction.
+// Can be toggled anytime in Serial Monitor with 'M' command!
+bool MIRROR_RIGHT_ARM    = false;
+bool faceStoryActive     = true;  // Continuous OLED story animation loop active
+bool calibrationMode     = false;
+bool isStopped           = false;
+
+void setSyncTarget(float targetAngle, float speed = 2.4) {
+  targetServoAngle = constrain(targetAngle, 0, 180);
+  armSpeed = speed;
+}
 
 // ----------------------------------------------------------------------------
 // 4. ORGANIC EYEBALL PHYSICS & BLINKING
@@ -182,7 +197,7 @@ unsigned long lastArmUpdateTime = 0;
 unsigned long lastOledDraw = 0;
 
 // IR Sensor State
-bool irSensorEnabled = true; // Set to false via 'IR OFF' command
+bool irSensorEnabled = true;  // Default: IR ACTIVE (Interactive hand detection active on boot!)
 bool lastIrDetected = false;
 unsigned long irTriggerTime = 0;
 unsigned long irDetectStartTime = 0;
@@ -286,76 +301,7 @@ void drawIntroTextScreen() {
   }
 }
 
-// ----------------------------------------------------------------------------
-// 6B. SCREEN: "HAIII! I SEE YOU!" (Triggered by IR Sensor Hand Detection!)
-// ----------------------------------------------------------------------------
 
-void drawHaiiiScreen() {
-  const char line1[] = "HAIII!";
-  const char line2[] = "I SEE YOU!";
-  const char line3[] = "MADE BY";
-  const char line4[] = "BATCH 4 TEAM";
-
-  for (uint8_t p = 0; p < 8; p++) {
-    Wire.beginTransmission(OLED_I2C_ADDR);
-    Wire.write(0x00);
-    Wire.write(0xB0 + p);
-    Wire.write(0x02);
-    Wire.write(0x10);
-    Wire.endTransmission();
-
-    for (uint8_t col = 0; col < 128; col++) {
-      uint8_t b = 0x00;
-
-      // Sparkling border
-      uint8_t sparkle = (millis() / 180) % 2;
-      if (p == 0) {
-        if (col >= 4 && col <= 123) b = (col % 2 == sparkle) ? 0x03 : 0x00;
-        if (col == 4 || col == 123) b = 0xFF;
-      } else if (p == 7) {
-        if (col >= 4 && col <= 123) b = (col % 2 == sparkle) ? 0xC0 : 0x00;
-        if (col == 4 || col == 123) b = 0xFF;
-      } else if (col == 4 || col == 123) {
-        b = 0xFF;
-      }
-
-      const char* curText = NULL;
-      int textLen = 0;
-
-      if (p == 1) { curText = line1; textLen = sizeof(line1) - 1; }
-      else if (p == 3) { curText = line2; textLen = sizeof(line2) - 1; }
-      else if (p == 5) { curText = line3; textLen = sizeof(line3) - 1; }
-      else if (p == 6) { curText = line4; textLen = sizeof(line4) - 1; }
-
-      if (curText != NULL) {
-        int totalWidth = textLen * 6;
-        int startX = (128 - totalWidth) / 2;
-
-        if (col >= startX && col < startX + totalWidth) {
-          int relX = col - startX;
-          int charIdx = relX / 6;
-          int fontCol = relX % 6;
-
-          if (fontCol < 5) {
-            char c = curText[charIdx];
-            if (c >= ' ' && c <= 'Z') {
-              uint8_t fontData = pgm_read_byte(&FONT5x7[c - ' '][fontCol]);
-              b |= fontData;
-            }
-          }
-        }
-      }
-
-      if (col % 16 == 0) {
-        Wire.endTransmission();
-        Wire.beginTransmission(OLED_I2C_ADDR);
-        Wire.write(0x40);
-      }
-      Wire.write(b);
-    }
-    Wire.endTransmission();
-  }
-}
 
 // ----------------------------------------------------------------------------
 // 7. HUGE 39x40 PIXEL GLOWING CARTOON HEARTS (Full Face Sockets!)
@@ -366,6 +312,15 @@ void triggerSmoothWink() {
   currentMood = MOOD_WINK;
   winkProgress = 0.0;
   winkDirection = 1;
+}
+
+void triggerGigaChadWink() {
+  currentFace = FACE_ORGANIC_ROBOT;
+  currentMood = MOOD_GIGACHAD;
+  winkProgress = 100.0;
+  winkDirection = 0;
+  targetPupilX = -1;
+  targetPupilY = -1;
 }
 
 // 40-Row Symmetric Plump Cartoon Heart Table (Half-Spans in PROGMEM)
@@ -388,13 +343,15 @@ void renderFastScreen() {
   int pY = (int)round(pupilY);
   int curBlink = (int)round(blinkProgress);
   int curWink  = (int)round(winkProgress);
+  // Bouncy giggling motion: hearts bob up and down playfully between -3 and +3 pixels
+  int giggleY  = (currentMood == MOOD_HEART) ? (int)round(sin(millis() * 0.022) * 3.5) : 0;
 
   int leftCenterX  = 38;
   int rightCenterX = 90;
   int eyeCenterY   = 28;
 
   int eyeHalfW = 14; // Sclera width = 28px
-  int eyeHalfH = (currentMood == MOOD_SURPRISED) ? 19 : 17; // Sclera height = 34px
+  int eyeHalfH = (currentMood == MOOD_SURPRISED) ? 19 : ((currentMood == MOOD_GIGACHAD) ? 13 : 17); // Sclera height
 
   int leftLidHalfH  = map(curBlink, 0, 100, eyeHalfH, 2);
   int rightLidHalfH = map(max(curBlink, curWink), 0, 100, eyeHalfH, 2);
@@ -421,10 +378,12 @@ void renderFastScreen() {
 
         // --- HUGE 39x40 GLOWING CARTOON HEARTS IN BOTH EYES! ❤️❤️ ---
         if (currentMood == MOOD_HEART) {
-          // Heartbeat pulse rhythm: thump-thump ... thump-thump
-          unsigned long pulseTime = millis() % 850;
-          bool isPulsing = (pulseTime < 140) || (pulseTime > 240 && pulseTime < 380);
-          int heartTopY = isPulsing ? 5 : 6;
+          // Playful giggle bounce: hearts smoothly bob up and down
+          unsigned long pulseTime = millis() % 750;
+          bool isPulsing = (pulseTime < 120) || (pulseTime > 200 && pulseTime < 320);
+          int heartTopY = 6 + giggleY;
+          if (heartTopY < 2) heartTopY = 2;
+          if (heartTopY > 10) heartTopY = 10;
 
           // Check Left Eye (center col 36) and Right Eye (center col 92)
           int dxL = abs(col - 36);
@@ -479,7 +438,7 @@ void renderFastScreen() {
             int curLidH    = isRight ? rightLidHalfH : leftLidHalfH;
             int curEyeBlink = isRight ? max(curBlink, curWink) : curBlink;
 
-            // SMOOTH WINK: Right eye curves shut playfully
+            // SMOOTH WINK: Right eye curves shut playfully when winking
             if (isRight && curWink >= 75) {
               int dx = col - curCenterX;
               int targetY = eyeCenterY + 2 + (dx * dx) / 26;
@@ -555,15 +514,44 @@ void renderFastScreen() {
           }
         }
 
+        // --- GIGA CHAD EYEBROWS ---
+        if (currentMood == MOOD_GIGACHAD) {
+          for (uint8_t bit = 0; bit < 8; bit++) {
+            int y = pageTopY + bit;
+            // Left Eyebrow: Confident fierce downward slope toward center (col 24 to 50, y from 11 to 15)
+            if (col >= 24 && col <= 50) {
+              int browY = 11 + ((col - 24) * 4) / 26;
+              if (y == browY || y == browY - 1) pixelByte |= (1 << bit);
+            }
+            // Right Eyebrow: Cocked / Raised high above wink (col 76 to 104, arched from y 14 to y 8)
+            if (col >= 76 && col <= 104) {
+              int rdx = col - 90;
+              int browY = 8 + (rdx * rdx) / 36;
+              if (y == browY || y == browY - 1) pixelByte |= (1 << bit);
+            }
+          }
+        }
+
         // --- CUTE MOUTHS & ROSY BLUSH ---
         for (uint8_t bit = 0; bit < 8; bit++) {
           int y = pageTopY + bit;
 
-          if (currentMood == MOOD_HAPPY || currentMood == MOOD_HEART) {
-            int dx = col - 64; int dy = y - 48;
+          if (currentMood == MOOD_GIGACHAD) {
+            // Iconic Giga Chad Smirk (sharp, cocky upward curve on the right side)
+            if (col >= 55 && col <= 63 && (y == 52 || y == 53)) pixelByte |= (1 << bit);
+            if (col >= 64 && col <= 67 && (y == 51 || y == 52)) pixelByte |= (1 << bit);
+            if (col >= 68 && col <= 71 && (y == 49 || y == 50)) pixelByte |= (1 << bit);
+            if (col >= 72 && col <= 74 && (y == 47 || y == 48)) pixelByte |= (1 << bit);
+            if (col == 75 && (y >= 45 && y <= 47)) pixelByte |= (1 << bit); // Cheeky smirk crease
+            // Chiseled chin cleft
+            if (col >= 62 && col <= 66 && y == 57) pixelByte |= (1 << bit);
+          } else if (currentMood == MOOD_HAPPY || currentMood == MOOD_HEART) {
+            int mouthYOffset = (currentMood == MOOD_HEART) ? (giggleY / 2) : 0;
+            int dx = col - 64; int dy = y - (48 + mouthYOffset);
             int r2 = dx*dx + dy*dy;
-            if (r2 <= 49 && r2 >= 25 && y >= 49) pixelByte |= (1 << bit);
-            if (y == 44 && ((col >= 22 && col <= 26) || (col >= 102 && col <= 106))) pixelByte |= (1 << bit);
+            if (r2 <= 49 && r2 >= 25 && y >= 49 + mouthYOffset) pixelByte |= (1 << bit);
+            int blushY = 44 + mouthYOffset;
+            if (y == blushY && ((col >= 22 && col <= 26) || (col >= 102 && col <= 106))) pixelByte |= (1 << bit);
           } else if (currentMood == MOOD_WINK || winkProgress > 20) {
             if (y == 51 && col >= 62 && col <= 72) pixelByte |= (1 << bit);
             if (y == 50 && col == 73) pixelByte |= (1 << bit);
@@ -648,28 +636,29 @@ void updateEyePhysics() {
 
   // Smooth Animated Wink Physics
   if (winkDirection == 1) {
-    winkProgress += 14.0;
+    winkProgress += 10.0;
     if (winkProgress >= 100.0) {
       winkProgress = 100.0;
       winkDirection = 2;
       winkHoldTimer = now;
     }
   } else if (winkDirection == 2) {
-    if (now - winkHoldTimer >= 500) {
+    // Hold the cute wink for 1.1s so it is clearly seen!
+    if (now - winkHoldTimer >= 1100) {
       winkDirection = -1;
     }
   } else if (winkDirection == -1) {
-    winkProgress -= 16.0;
+    winkProgress -= 12.0;
     if (winkProgress <= 0.0) {
       winkProgress = 0.0;
       winkDirection = 0;
-      currentMood = MOOD_NORMAL;
+      if (currentMood == MOOD_WINK) currentMood = MOOD_NORMAL;
     }
   }
 
   // Natural Eyelid Blinking
   if (blinkDirection == 0 && (now - lastBlinkTime > nextBlinkInterval)) {
-    if (winkDirection == 0 && currentMood != MOOD_HEART) {
+    if (winkDirection == 0 && currentMood != MOOD_HEART && currentMood != MOOD_GIGACHAD) {
       blinkDirection = 1;
       doubleBlinkQueued = (random(0, 10) < 3);
     }
@@ -704,34 +693,92 @@ void updateEyePhysics() {
 
 void updateArms() {
   if (calibrationMode) {
-    int leftCalib  = constrain(90 + leftOffset, 0, 180);
-    int rightCalib = constrain((MIRROR_RIGHT_ARM ? (180 - 90) : 90) + rightOffset, 0, 180);
-    leftServo.write(leftCalib);
-    rightServo.write(rightCalib);
+    // Both servos locked at 90° in processSerialCommand. Return to keep Timer 1 clean!
     return;
   }
 
   if (isStopped) return;
 
-  if (millis() - lastArmUpdateTime >= 20) {
-    lastArmUpdateTime = millis();
+  unsigned long now = millis();
+  if (now - lastArmUpdateTime < 20) return;
+  lastArmUpdateTime = now;
 
-    if (abs(currentServoAngle - targetServoAngle) > 0.5) {
-      if (currentServoAngle < targetServoAngle) {
-        currentServoAngle += armSpeed;
-        if (currentServoAngle > targetServoAngle) currentServoAngle = targetServoAngle;
-      } else {
-        currentServoAngle -= armSpeed;
-        if (currentServoAngle < targetServoAngle) currentServoAngle = targetServoAngle;
-      }
-
-      int leftAngle = constrain((int)currentServoAngle + leftOffset, 0, 180);
-      int baseRight = MIRROR_RIGHT_ARM ? (180 - (int)currentServoAngle) : (int)currentServoAngle;
-      int rightAngle = constrain(baseRight + rightOffset, 0, 180);
-
-      leftServo.write(leftAngle);
-      rightServo.write(rightAngle);
+  if (abs(currentServoAngle - targetServoAngle) > 0.4) {
+    if (currentServoAngle < targetServoAngle) {
+      currentServoAngle += armSpeed;
+      if (currentServoAngle > targetServoAngle) currentServoAngle = targetServoAngle;
+    } else {
+      currentServoAngle -= armSpeed;
+      if (currentServoAngle < targetServoAngle) currentServoAngle = targetServoAngle;
     }
+
+    int leftAngle = constrain((int)round(currentServoAngle) + leftOffset, 0, 180);
+    int baseRight = MIRROR_RIGHT_ARM ? (180 - (int)round(currentServoAngle)) : (int)round(currentServoAngle);
+    int rightAngle = constrain(baseRight + rightOffset, 0, 180);
+
+    leftServo.write(leftAngle);
+    rightServo.write(rightAngle);
+  }
+}
+
+void setStoryStep(int newStep, unsigned long now) {
+  storyStep = newStep;
+  storyStepTimer = now;
+
+  switch (storyStep) {
+    case 0: // 1. Glance Left #1
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_NORMAL;
+      targetPupilX = -6;
+      targetPupilY = 0;
+      setSyncTarget(ARM_DOWN_ANGLE, 2.0); // Arms resting down
+      break;
+    case 1: // 2. Glance Right #1
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_NORMAL;
+      targetPupilX = 6;
+      targetPupilY = 0;
+      break;
+    case 2: // 3. Glance Left #2 (Looking left & right twice)
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_NORMAL;
+      targetPupilX = -6;
+      targetPupilY = 0;
+      break;
+    case 3: // 4. Glance Right #2
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_NORMAL;
+      targetPupilX = 6;
+      targetPupilY = 0;
+      break;
+    case 4: // 5. Look Straight / Center
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_NORMAL;
+      targetPupilX = 0;
+      targetPupilY = 0;
+      break;
+    case 5: // 6. Smooth Playful Wink 😉
+      targetPupilX = 0;
+      targetPupilY = 0;
+      triggerSmoothWink();
+      break;
+    case 6: // 7. Cute Confident Smile 😎 (Both eyes open, cocked eyebrow, confident smirk!)
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_GIGACHAD;
+      winkProgress = 0.0;
+      winkDirection = 0;
+      targetPupilX = 0;
+      targetPupilY = 0;
+      break;
+    case 7: // 8. Cute Giggling Heart Eyes! ❤️❤️ (Bounces up & down playfully!)
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_HEART;
+      winkProgress = 0.0;
+      winkDirection = 0;
+      targetPupilX = 0;
+      targetPupilY = 0;
+      setSyncTarget(ARM_UP_ANGLE, 2.4); // Both arms swing UP with hearts! 🙌
+      break;
   }
 }
 
@@ -740,85 +787,40 @@ void updateStoryChoreography() {
 
   if (currentFace == FACE_TEXT_INTRO) {
     if (now - introStartTime > 3500) {
-      currentFace = FACE_ORGANIC_ROBOT;
-      storyStep = 0;
-      storyStepTimer = now;
+      faceStoryActive = true;
+      setStoryStep(0, now);
     }
     return;
   }
 
-  if (!autoDanceMode || calibrationMode || isStopped) return;
-  if (lastIrDetected) return; // Keep Woody in interactive greeting while hand is present!
+  // Story runs continuously on OLED unless temporarily showing a specific face or IR trigger
+  if (!faceStoryActive) return;
+  if (lastIrDetected) return; // Hold heart eyes while IR object is present!
 
-  // The Continuous Choreographed Story:
-  // Step 0: Glance Left & Blink naturally (2.6s)
-  // Step 1: Glance Right & Blink naturally (2.6s)
-  // Step 2: Smooth Playful Wink 😉 (2.6s)
-  // Step 3: HUGE GLOWING HEARTS ❤️❤️ + Both Arms Swing UP! 🙌 (3.6s)
-  // Repeat seamlessly!
+  // Durations for each step in milliseconds:
+  unsigned long stepDuration = 1200; // Glance duration
+  if (storyStep == 4) stepDuration = 1100;      // Look Straight
+  else if (storyStep == 5) stepDuration = 1500; // Playful Wink 😉
+  else if (storyStep == 6) stepDuration = 2000; // Cute Confident Smile 😎
+  else if (storyStep == 7) stepDuration = 2400; // Giggling Heart Eyes ❤️❤️ (Bounce up & down!)
 
-  if (storyStep == 0) {
-    if (now - storyStepTimer >= 2600) {
-      storyStep = 1;
-      storyStepTimer = now;
-      targetPupilX = 6;  // Look Right!
-      targetPupilY = 0;
-      targetServoAngle = ARM_DOWN_ANGLE + 15;
-      armSpeed = 1.8;
-      Serial.println(F("[STORY] Glancing Right while Blinking"));
-    }
-  }
-  else if (storyStep == 1) {
-    if (now - storyStepTimer >= 2600) {
-      storyStep = 2;
-      storyStepTimer = now;
-      targetPupilX = 0;
-      targetPupilY = 0;
-      targetServoAngle = 80;
-      armSpeed = 2.2;
-      triggerSmoothWink();
-      Serial.println(F("[STORY] Smooth Playful Wink! 😉"));
-    }
-  }
-  else if (storyStep == 2) {
-    if (now - storyStepTimer >= 2600) {
-      storyStep = 3;
-      storyStepTimer = now;
-      currentFace = FACE_ORGANIC_ROBOT;
-      currentMood = MOOD_HEART; // HUGE GLOWING HEARTS! ❤️❤️
-      targetPupilX = 0;
-      targetPupilY = 0;
-      targetServoAngle = ARM_UP_ANGLE; // ARMS UP! 🙌
-      armSpeed = 2.5;
-      Serial.println(F("[STORY] HUGE GLOWING HEARTS ❤️❤️ + ARMS UP! 🙌"));
-    }
-  }
-  else if (storyStep == 3) {
-    if (now - storyStepTimer >= 3600) {
-      storyStep = 0;
-      storyStepTimer = now;
-      currentFace = FACE_ORGANIC_ROBOT;
-      currentMood = MOOD_NORMAL;
-      targetPupilX = -6; // Look Left!
-      targetPupilY = 0;
-      targetServoAngle = ARM_DOWN_ANGLE;
-      armSpeed = 1.6;
-      Serial.println(F("[STORY] Glancing Left while Blinking"));
-    }
+  if (now - storyStepTimer >= stepDuration) {
+    int nextStep = (storyStep + 1) % 8;
+    setStoryStep(nextStep, now);
   }
 }
 
 // ----------------------------------------------------------------------------
-// 10. IR SENSOR (HAND DETECTION & GREETING)
+// 10. IR SENSOR (HAND DETECTION -> HUGE GLOWING HEART EYES ❤️❤️)
 // ----------------------------------------------------------------------------
 
 void checkIrSensor() {
-  if (!irSensorEnabled) return; // Temporarily disabled to avoid interfering with manual controls!
+  if (!irSensorEnabled) return; // Default: IR OFF (Toggle with 'IR' or 'IR ON')
 
   bool rawReading = (digitalRead(IR_SENSOR_PIN) == LOW);
   unsigned long now = millis();
 
-  // 50ms Debounce Filter: Prevents rapid flickering from room light noise
+  // 50ms Debounce Filter
   if (rawReading) {
     if (irDetectStartTime == 0) irDetectStartTime = now;
   } else {
@@ -830,22 +832,23 @@ void checkIrSensor() {
   if (isDetected && !lastIrDetected) {
     lastIrDetected = true;
     irTriggerTime = now;
-    currentFace = FACE_HAIII;        // 📺 DISPLAY "HAIII! I SEE YOU!" SCREEN!
-    targetServoAngle = ARM_UP_ANGLE;  // Both arms swing UP in excitement! 🙌
-    armSpeed = 3.2;
-    Serial.println(F("\n👋 [IR SENSOR DETECTED]: >>> HAIII! I SEE YOU! <<< ❤️🙌"));
+    currentFace = FACE_ORGANIC_ROBOT;
+    currentMood = MOOD_HEART;             // ❤️❤️ Display heart emoji in eyes!
+    targetPupilX = 0;
+    targetPupilY = 0;
+    setSyncTarget(ARM_UP_ANGLE, 2.4); // Both arms swing UP in excitement! 🙌
+    Serial.println(F("\n💖 [IR DETECTED]: Heart Eyes ❤️❤️ + Both Arms UP! 🙌"));
   }
   else if (!isDetected && lastIrDetected) {
-    // Hold "HAIII!" greeting for at least 2 seconds so it is clearly readable
-    if (now - irTriggerTime >= 2000) {
+    // Hold heart eyes for at least 1.8s after object clears
+    if (now - irTriggerTime >= 1800) {
       lastIrDetected = false;
       currentFace = FACE_ORGANIC_ROBOT;
       currentMood = MOOD_NORMAL;
-      targetServoAngle = ARM_DOWN_ANGLE;
-      armSpeed = 1.6;
-      storyStep = 0;
-      storyStepTimer = now;
-      Serial.println(F("👋 [IR SENSOR]: Hand cleared. Resuming normal story loop."));
+      setSyncTarget(ARM_DOWN_ANGLE, 2.0);
+      faceStoryActive = true;
+      setStoryStep(0, now);
+      Serial.println(F("💖 [IR CLEARED]: Resumed default animation loop."));
     }
   }
 }
@@ -856,180 +859,303 @@ void checkIrSensor() {
 
 void printCommandMenu() {
   Serial.println(F("\n========================================================"));
-  Serial.println(F("   🤖 WOODY THE ROBOT - BATCH 4 TEAM (9600 BAUD) 🤖"));
+  Serial.println(F("   🤖 WOODY THE ROBOT - COMMAND MENU (9600 BAUD) 🤖"));
   Serial.println(F("========================================================"));
-  Serial.println(F("  [DEFAULT STORY SEQUENCE ACTIVE]"));
-  Serial.println(F("    1. Moving Eyeballs Left/Right + Blinking Naturally"));
-  Serial.println(F("    2. Playful One-Eye Wink 😉"));
-  Serial.println(F("    3. HUGE GLOWING HEARTS in BOTH Eyes ❤️❤️ + Arms UP! 🙌"));
-  Serial.println(F("    (Loops continuously!)"));
+  Serial.println(F("  [SERVO CONTROLS - HIGH PRIORITY]"));
+  Serial.println(F("    'U' / 'UP'       -> Both Arms UP in sync 🙌"));
+  Serial.println(F("    'D' / 'DOWN'     -> Both Arms DOWN in sync 👇"));
+  Serial.println(F("    'C' or 'CAL'     -> Calibration Mode (Locks both arms at 90.0°) 🎯"));
+  Serial.println(F("    'TEST'           -> Diagnostic sweep: Left arm then Right arm 🔬"));
+  Serial.println(F("    'M' or 'MIRROR'  -> Toggle Mirror Mode (for back-to-back vs side-by-side) 🔄"));
+  Serial.println(F("    'L <angle>'      -> Move Left arm directly (e.g. 'L 90', 'L 25')"));
+  Serial.println(F("    'R <angle>'      -> Move Right arm directly (e.g. 'R 90', 'R 25')"));
+  Serial.println(F("    '0' - '180'      -> Move both arms to angle in sync (e.g. '90')"));
+  Serial.println(F("    'L+' / 'L-'      -> Fine-tune Left arm offset"));
+  Serial.println(F("    'R+' / 'R-'      -> Fine-tune Right arm offset"));
+  Serial.println(F("    'S' or 'STOP'    -> Stop / Freeze arms 🛑"));
   Serial.println(F(""));
-  Serial.println(F("  [IR SENSOR DETECT]: Wave hand in front -> Instant HUGE Hearts & Arms UP! 🙌"));
-  Serial.println(F("    'IR OFF' / 'IR ON'-> Temporarily disable/enable IR sensor (no U/D interference)"));
-  Serial.println(F("    'IR'              -> Toggle IR sensor ON / OFF"));
+  Serial.println(F("  [DEFAULT STORY ANIMATION]"));
+  Serial.println(F("    'W' or '3'       -> Resume Default Story Loop 👋"));
+  Serial.println(F("       (Look Left/Right twice -> Straight -> Wink -> Confident Smile -> Giggling Hearts!)"));
+  Serial.println(F("    '1' / 'CREEPER'  -> Minecraft Creeper face 🟩"));
+  Serial.println(F("    '2' / 'HEROBRINE'-> Minecraft Herobrine face 👻"));
+  Serial.println(F("    'K' / 'WINK'     -> Smooth Animated Wink 😉"));
+  Serial.println(F("    'G' / 'SMILE'    -> Cute Confident Smile 😎"));
+  Serial.println(F("    'H' / 'HEART'    -> Heart Eyes ❤️❤️"));
   Serial.println(F(""));
-  Serial.println(F("  [COMMANDS]"));
-  Serial.println(F("    'T' or 'INTRO'   -> Replay 'HELLO, I AM WOODY BATCH 4' Screen"));
-  Serial.println(F("    '3' or 'ROBOT'   -> Resume Default Story Animation"));
-  Serial.println(F("    'K' or 'WINK'    -> Instant Animated Wink 😉"));
-  Serial.println(F("    'H' or 'HEART'   -> Instant HUGE Heart Eyes ❤️❤️"));
-  Serial.println(F("    'O' or 'WOW'     -> Surprised Alert Eyes 😲"));
-  Serial.println(F("    '1' or 'CREEPER' -> 1:1 Pixel Minecraft Creeper 🟩"));
-  Serial.println(F("    '2' or 'HEROBRINE'-> Glowing Herobrine Face 👻"));
-  Serial.println(F("    'S'              -> Emergency STOP / Freeze Arms 🛑"));
-  Serial.println(F("    'W'              -> Resume Auto Dance / Wave 👋"));
-  Serial.println(F("    'U' / 'D'        -> Arms UP / DOWN"));
-  Serial.println(F("    'C'              -> Calibrate Arms at 90 deg 🎯"));
-  Serial.println(F("    'L+' / 'R+'      -> Fine-tune arm angles"));
+  Serial.println(F("  [IR SENSOR - DEFAULT: ACTIVE]"));
+  Serial.println(F("    'IRTEST'         -> Diagnostic check of IR sensor reading on Pin 2 🔍"));
+  Serial.println(F("    'IR ON' / 'IR'   -> Enable IR Detection"));
+  Serial.println(F("    'IR OFF'         -> Disable IR Detection"));
   Serial.println(F("========================================================\n"));
 }
 
-void checkSerialCommands() {
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    cmd.toUpperCase();
-    if (cmd.length() == 0) return;
+String serialCmdBuffer = "";
+unsigned long lastSerialCharTime = 0;
 
-    Serial.print(F("\n>>> [COMMAND RECEIVED]: '"));
-    Serial.print(cmd);
-    Serial.println(F("'"));
+int extractFirstNumber(const String& str) {
+  String num = "";
+  for (unsigned int i = 0; i < str.length(); i++) {
+    char c = str.charAt(i);
+    if (isDigit(c)) {
+      num += c;
+    } else if (num.length() > 0) {
+      break;
+    }
+  }
+  if (num.length() > 0) return num.toInt();
+  return -1;
+}
 
-    if (cmd == "?" || cmd == "HELP" || cmd == "MENU") {
-      printCommandMenu();
+void processSerialCommand(String cmd) {
+  cmd.trim();
+  cmd.toUpperCase();
+  if (cmd.length() == 0) return;
+
+  Serial.print(F(">>> [COMMAND]: '"));
+  Serial.print(cmd);
+  Serial.println(F("'"));
+
+  if (cmd == "?" || cmd == "HELP" || cmd == "MENU") {
+    printCommandMenu();
+  }
+  // SERVO COMMANDS (PRIORITY 1)
+  // 1. FINE TUNING TRIMS (MUST BE BEFORE cmd.startsWith("L") / "R"!)
+  else if (cmd == "L+" || cmd == "LEFT+") {
+    leftOffset++;
+    Serial.print(F("Left Offset: ")); Serial.println(leftOffset);
+  } else if (cmd == "L-" || cmd == "LEFT-") {
+    leftOffset--;
+    Serial.print(F("Left Offset: ")); Serial.println(leftOffset);
+  } else if (cmd == "R+" || cmd == "RIGHT+") {
+    rightOffset++;
+    Serial.print(F("Right Offset: ")); Serial.println(rightOffset);
+  } else if (cmd == "R-" || cmd == "RIGHT-") {
+    rightOffset--;
+    Serial.print(F("Right Offset: ")); Serial.println(rightOffset);
+  }
+  // 2. DIRECT SERVO COMMANDS (PRIORITY 1)
+  else if (cmd == "U" || cmd == "UP") {
+    isStopped = false;
+    calibrationMode = false;
+    setSyncTarget(ARM_UP_ANGLE, 2.4);
+    Serial.println(F("🙌 [SERVO]: Both Arms UP! (Position locked)"));
+  }
+  else if (cmd == "D" || cmd == "DOWN") {
+    isStopped = false;
+    calibrationMode = false;
+    setSyncTarget(ARM_DOWN_ANGLE, 2.0);
+    Serial.println(F("👇 [SERVO]: Both Arms DOWN! (Position locked)"));
+  }
+  else if (cmd == "C" || cmd == "CAL" || cmd == "CALIBRATE") {
+    calibrationMode = !calibrationMode;
+    isStopped = false;
+    if (calibrationMode) {
+      currentServoAngle = 90;
+      targetServoAngle = 90;
+      int leftCalib  = constrain(90 + leftOffset, 0, 180);
+      int rightCalib = constrain((MIRROR_RIGHT_ARM ? (180 - 90) : 90) + rightOffset, 0, 180);
+      leftServo.write(leftCalib);
+      rightServo.write(rightCalib);
+      Serial.println(F("🎯 [CALIBRATION MODE]: Both motors actively LOCKED at 90.0°!"));
+      Serial.println(F("   (Steady 90° hold - align/push horns on now. Type 'C' to exit)"));
+    } else {
+      setSyncTarget(ARM_DOWN_ANGLE, 2.0);
+      Serial.println(F("✅ [CALIBRATION COMPLETE]: Exited. Both arms returning DOWN."));
     }
-    else if (cmd == "T" || cmd == "INTRO" || cmd == "HELLO" || cmd == "WOODY") {
-      currentFace = FACE_TEXT_INTRO;
-      introStartTime = millis();
-      Serial.println(F("📺 [DISPLAY]: Showing 'HELLO, I AM WOODY - BATCH 4 TEAM' Screen!"));
+  }
+  else if (cmd == "TEST" || cmd == "SWEEP" || cmd == "CHECK") {
+    isStopped = false;
+    calibrationMode = false;
+    Serial.println(F("\n🔬 [HARDWARE DIAGNOSTIC SWEEP]:"));
+    Serial.println(F("  1. Left Arm: 25° -> 90° -> 135° -> 25°..."));
+    leftServo.write(25 + leftOffset); delay(400);
+    leftServo.write(90 + leftOffset); delay(400);
+    leftServo.write(135 + leftOffset); delay(500);
+    leftServo.write(25 + leftOffset); delay(400);
+
+    int rDown = MIRROR_RIGHT_ARM ? (180 - 25) : 25;
+    int rMid  = MIRROR_RIGHT_ARM ? (180 - 90) : 90;
+    int rUp   = MIRROR_RIGHT_ARM ? (180 - 135) : 135;
+    Serial.print(F("  2. Right Arm: "));
+    Serial.print(rDown); Serial.print(F("° -> "));
+    Serial.print(rMid);  Serial.print(F("° -> "));
+    Serial.print(rUp);   Serial.print(F("° -> "));
+    Serial.print(rDown); Serial.println(F("°..."));
+    rightServo.write(rDown + rightOffset); delay(400);
+    rightServo.write(rMid + rightOffset); delay(400);
+    rightServo.write(rUp + rightOffset); delay(500);
+    rightServo.write(rDown + rightOffset); delay(400);
+
+    currentServoAngle = ARM_DOWN_ANGLE;
+    targetServoAngle  = ARM_DOWN_ANGLE;
+    Serial.println(F("  ✅ Test Complete! Arms resting DOWN.\n"));
+  }
+  else if (cmd == "M" || cmd == "MIRROR") {
+    MIRROR_RIGHT_ARM = !MIRROR_RIGHT_ARM;
+    Serial.print(F("🔄 Right arm mirror mode is now: "));
+    Serial.println(MIRROR_RIGHT_ARM ? F("MIRRORED (Back-to-back)") : F("DIRECT (Side-by-side)"));
+  }
+  else if (cmd.startsWith("LEFT") || cmd.startsWith("L")) {
+    int angle = extractFirstNumber(cmd);
+    if (angle >= 0) {
+      angle = constrain(angle, 0, 180);
+      isStopped = false;
+      calibrationMode = false;
+      leftServo.write(angle + leftOffset);
+      Serial.print(F("👈 [LEFT SERVO DIRECT]: Written to "));
+      Serial.print(angle);
+      Serial.println(F("°"));
+    } else {
+      Serial.println(F("❓ Specify angle for Left arm, e.g. 'L 90', 'L 135', 'L 25'"));
     }
-    else if (cmd == "HAI" || cmd == "HI" || cmd == "HAIII") {
-      currentFace = FACE_HAIII;
-      irTriggerTime = millis();
-      targetServoAngle = ARM_UP_ANGLE;
-      Serial.println(F("👋 [DISPLAY]: Showing 'HAIII! I SEE YOU!' Screen!"));
+  }
+  else if (cmd.startsWith("RIGHT") || cmd.startsWith("R")) {
+    int angle = extractFirstNumber(cmd);
+    if (angle >= 0) {
+      angle = constrain(angle, 0, 180);
+      isStopped = false;
+      calibrationMode = false;
+      rightServo.write(angle + rightOffset);
+      Serial.print(F("👉 [RIGHT SERVO DIRECT]: Written to "));
+      Serial.print(angle);
+      Serial.println(F("°"));
+    } else {
+      Serial.println(F("❓ Specify angle for Right arm, e.g. 'R 90', 'R 135', 'R 25'"));
     }
-    else if (cmd == "IR OFF" || cmd == "IOFF" || cmd == "IR 0" || cmd == "I0" || cmd == "OFF" || cmd == "IROFF") {
-      irSensorEnabled = false;
+  }
+  else if (cmd == "S" || cmd == "STOP" || cmd == "FREEZE") {
+    isStopped = true;
+    calibrationMode = false;
+    targetServoAngle = currentServoAngle;
+    Serial.println(F("🛑 [SERVO]: Motion stopped / frozen."));
+  }
+  // 3. OLED FACIAL EXPRESSIONS & STORY ANIMATION (MUST BE BEFORE NUMERIC MATCHING!)
+  else if (cmd == "3" || cmd == "ROBOT" || cmd == "W" || cmd == "PLAY" || cmd == "RESUME") {
+    currentFace = FACE_ORGANIC_ROBOT;
+    currentMood = MOOD_NORMAL;
+    faceStoryActive = true;
+    calibrationMode = false;
+    isStopped = false;
+    setStoryStep(0, millis());
+    setSyncTarget(ARM_DOWN_ANGLE, 2.0);
+    Serial.println(F("🤖 [STORY]: Resumed Default Animation Loop!"));
+  }
+  else if (cmd == "1" || cmd == "CREEPER") {
+    faceStoryActive = false;
+    currentFace = FACE_CREEPER;
+    Serial.println(F("🟩 [OLED]: Minecraft Creeper!"));
+  }
+  else if (cmd == "2" || cmd == "HEROBRINE") {
+    faceStoryActive = false;
+    currentFace = FACE_HEROBRINE;
+    Serial.println(F("👻 [OLED]: Glowing Herobrine Face!"));
+  }
+  else if (cmd == "K" || cmd == "WINK") {
+    faceStoryActive = false;
+    triggerSmoothWink();
+    Serial.println(F("😉 [OLED]: Smooth Animated Wink!"));
+  }
+  else if (cmd == "H" || cmd == "HEART" || cmd == "HEARTS") {
+    faceStoryActive = false;
+    currentFace = FACE_ORGANIC_ROBOT;
+    currentMood = MOOD_HEART;
+    setSyncTarget(ARM_UP_ANGLE, 2.4);
+    Serial.println(F("💖 [OLED]: HUGE Glowing Heart Eyes! ❤️❤️"));
+  }
+  else if (cmd == "G" || cmd == "CHAD" || cmd == "SMILE") {
+    faceStoryActive = false;
+    currentFace = FACE_ORGANIC_ROBOT;
+    currentMood = MOOD_GIGACHAD;
+    winkProgress = 0.0;
+    winkDirection = 0;
+    targetPupilX = 0;
+    targetPupilY = 0;
+    Serial.println(F("😎 [OLED]: Confident Smile & Smirk!"));
+  }
+  else if (cmd == "T" || cmd == "INTRO") {
+    faceStoryActive = false;
+    currentFace = FACE_TEXT_INTRO;
+    introStartTime = millis();
+    Serial.println(F("📺 [OLED]: Batch 4 Intro Screen."));
+  }
+  // 4. IR SENSOR CONTROLS & LIVE DIAGNOSTIC TEST
+  else if (cmd == "IRTEST" || cmd == "IRCHECK" || cmd == "IRDEBUG") {
+    int val = digitalRead(IR_SENSOR_PIN);
+    Serial.print(F("🔍 [IR SENSOR TEST]: Pin "));
+    Serial.print(IR_SENSOR_PIN);
+    Serial.print(F(" State = "));
+    Serial.print(val);
+    if (val == LOW) {
+      Serial.println(F(" (LOW -> OBSTACLE DETECTED! Hand in front) ✋"));
+    } else {
+      Serial.println(F(" (HIGH -> CLEAR / No obstacle)"));
+    }
+    Serial.print(F("   IR Sensor Enabled: "));
+    Serial.println(irSensorEnabled ? F("YES (ON)") : F("NO (OFF)"));
+    Serial.println(F("   Tip: If reading doesn't change, turn the small potentiometer screw on the IR sensor module!"));
+  }
+  else if (cmd == "IR OFF" || cmd == "IOFF" || cmd == "IR 0" || cmd == "I0" || cmd == "OFF" || cmd == "IROFF") {
+    irSensorEnabled = false;
+    lastIrDetected = false;
+    if (currentMood == MOOD_HEART) {
+      currentFace = FACE_ORGANIC_ROBOT;
+      currentMood = MOOD_NORMAL;
+    }
+    Serial.println(F("🚫 [IR SENSOR]: DISABLED."));
+  }
+  else if (cmd == "IR ON" || cmd == "ION" || cmd == "IR 1" || cmd == "I1" || cmd == "ON" || cmd == "IRON") {
+    irSensorEnabled = true;
+    Serial.println(F("✅ [IR SENSOR]: ENABLED! Hand detection active (Heart Eyes ❤️❤️)."));
+  }
+  else if (cmd == "IR") {
+    irSensorEnabled = !irSensorEnabled;
+    if (irSensorEnabled) {
+      Serial.println(F("✅ [IR SENSOR]: ENABLED! Hand detection active (Heart Eyes ❤️❤️)."));
+    } else {
       lastIrDetected = false;
-      if (currentFace == FACE_HAIII) {
+      if (currentMood == MOOD_HEART) {
         currentFace = FACE_ORGANIC_ROBOT;
         currentMood = MOOD_NORMAL;
       }
-      Serial.println(F("🚫 [IR SENSOR]: DISABLED! Manual U/D controls are now 100% active."));
+      Serial.println(F("🚫 [IR SENSOR]: DISABLED."));
     }
-    else if (cmd == "IR ON" || cmd == "ION" || cmd == "IR 1" || cmd == "I1" || cmd == "ON" || cmd == "IRON") {
-      irSensorEnabled = true;
-      Serial.println(F("✅ [IR SENSOR]: ENABLED! Hand detection active."));
-    }
-    else if (cmd == "IR") {
-      irSensorEnabled = !irSensorEnabled;
-      if (irSensorEnabled) {
-        Serial.println(F("✅ [IR SENSOR]: ENABLED! Hand detection active."));
-      } else {
-        lastIrDetected = false;
-        if (currentFace == FACE_HAIII) {
-          currentFace = FACE_ORGANIC_ROBOT;
-          currentMood = MOOD_NORMAL;
-        }
-        Serial.println(F("🚫 [IR SENSOR]: DISABLED! Manual U/D controls are now 100% active."));
+  }
+  // 5. NUMERIC ANGLE FOR BOTH ARMS (0 - 180) (MUST BE AFTER 1, 2, 3!)
+  else if (extractFirstNumber(cmd) >= 0) {
+    int angle = constrain(extractFirstNumber(cmd), 0, 180);
+    isStopped = false;
+    calibrationMode = false;
+    setSyncTarget(angle, 2.4);
+    Serial.print(F("🙌 [SERVO]: Both arms moved to: "));
+    Serial.print(angle);
+    Serial.println(F("°"));
+  }
+  else {
+    Serial.println(F("❓ Unknown command. Type '?' for menu."));
+  }
+}
+
+void checkSerialCommands() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    lastSerialCharTime = millis();
+    if (c == '\n' || c == '\r') {
+      if (serialCmdBuffer.length() > 0) {
+        processSerialCommand(serialCmdBuffer);
+        serialCmdBuffer = "";
+      }
+    } else {
+      if (serialCmdBuffer.length() < 30) {
+        serialCmdBuffer += c;
       }
     }
-    else if (cmd == "3" || cmd == "ROBOT") {
-      currentFace = FACE_ORGANIC_ROBOT;
-      autoDanceMode = true;
-      isStopped = false;
-      storyStep = 0;
-      storyStepTimer = millis();
-      Serial.println(F("\n🤖 [STORY]: Resumed Full Continuous Animation Loop!"));
-    }
-    else if (cmd == "K" || cmd == "WINK") {
-      triggerSmoothWink();
-      Serial.println(F("\n😉 [EXPRESSION]: Smooth Animated Wink!"));
-    }
-    else if (cmd == "H" || cmd == "HEART") {
-      currentFace = FACE_ORGANIC_ROBOT;
-      currentMood = MOOD_HEART;
-      Serial.println(F("\n💖 [EXPRESSION]: HUGE Glowing Heart Eyes in BOTH eyes! ❤️❤️"));
-    }
-    else if (cmd == "O" || cmd == "WOW" || cmd == "SURPRISED") {
-      currentFace = FACE_ORGANIC_ROBOT;
-      currentMood = MOOD_SURPRISED;
-      Serial.println(F("\n😲 [EXPRESSION]: Surprised Wide Eyes!"));
-    }
-    else if (cmd == "1" || cmd == "CREEPER") {
-      currentFace = FACE_CREEPER;
-      Serial.println(F("\n🟩 [FACE]: 1:1 Pixel Minecraft Creeper!"));
-    }
-    else if (cmd == "2" || cmd == "HEROBRINE") {
-      currentFace = FACE_HEROBRINE;
-      Serial.println(F("\n👻 [FACE]: Spooky Glowing Herobrine Face!"));
-    }
-    else if (cmd == "S" || cmd == "STOP") {
-      isStopped = true;
-      autoDanceMode = false;
-      calibrationMode = false;
-      lastIrDetected = false;
-      targetServoAngle = currentServoAngle;
-      Serial.println(F("🛑 [MOTION STOPPED / FROZEN] 🛑"));
-    }
-    else if (cmd == "C") {
-      isStopped = false;
-      calibrationMode = true;
-      autoDanceMode = false;
-      lastIrDetected = false;
-      Serial.println(F(">>> [CALIBRATION MODE: Holding at 90 deg] <<<"));
-    }
-    else if (cmd == "L+") {
-      leftOffset++;
-      Serial.print(F("Left Offset: ")); Serial.println(leftOffset);
-    } else if (cmd == "L-") {
-      leftOffset--;
-      Serial.print(F("Left Offset: ")); Serial.println(leftOffset);
-    } else if (cmd == "R+") {
-      rightOffset++;
-      Serial.print(F("Right Offset: ")); Serial.println(rightOffset);
-    } else if (cmd == "R-") {
-      rightOffset--;
-      Serial.print(F("Right Offset: ")); Serial.println(rightOffset);
-    }
-    else if (cmd == "U") {
-      isStopped = false;
-      calibrationMode = false;
-      autoDanceMode = false;
-      lastIrDetected = false;
-      if (currentFace == FACE_HAIII) currentFace = FACE_ORGANIC_ROBOT;
-      targetServoAngle = ARM_UP_ANGLE;
-      currentMood = MOOD_HAPPY;
-      Serial.println(F("[COMMAND] Arms UP & Happy! 🙌"));
-    }
-    else if (cmd == "D") {
-      isStopped = false;
-      calibrationMode = false;
-      autoDanceMode = false;
-      lastIrDetected = false;
-      if (currentFace == FACE_HAIII) currentFace = FACE_ORGANIC_ROBOT;
-      targetServoAngle = ARM_DOWN_ANGLE;
-      currentMood = MOOD_NORMAL;
-      Serial.println(F("[COMMAND] Arms DOWN! 👇"));
-    }
-    else if (cmd == "W") {
-      isStopped = false;
-      calibrationMode = false;
-      autoDanceMode = true;
-      storyStep = 0;
-      storyStepTimer = millis();
-      Serial.println(F("[COMMAND] Auto Dance / Story Loop Resumed! 👋"));
-    }
-    else if (cmd.toInt() > 0 || cmd == "0") {
-      isStopped = false;
-      calibrationMode = false;
-      autoDanceMode = false;
-      int angle = constrain(cmd.toInt(), 0, 180);
-      targetServoAngle = angle;
-      Serial.print(F("[COMMAND] Moving to angle: "));
-      Serial.println(angle);
-    }
+  }
+
+  // Handle "No line ending" in Arduino Serial Monitor after 60ms pause
+  if (serialCmdBuffer.length() > 0 && (millis() - lastSerialCharTime > 60)) {
+    processSerialCommand(serialCmdBuffer);
+    serialCmdBuffer = "";
   }
 }
 
@@ -1039,36 +1165,47 @@ void checkSerialCommands() {
 
 void setup() {
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);
+  // 3 quick blinks on boot (visual indicator if Arduino restarts due to power brownout)
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(LED_PIN, HIGH); delay(60);
+    digitalWrite(LED_PIN, LOW);  delay(60);
+  }
 
   Serial.begin(9600); // Standard 9600 baud (matches Arduino IDE default!)
-  Serial.setTimeout(50); // Fast 50ms timeout so commands respond immediately
-  printCommandMenu();
+  Serial.setTimeout(50);
+  Serial.println(F("\n========================================================"));
+  Serial.println(F("   🤖 WOODY ROBOT READY (9600 BAUD) | Type '?' for menu"));
+  Serial.println(F("========================================================\n"));
 
-  // 1. Initialize Servos
+  // 1. Initialize OLED Display (Fast 400kHz I2C)
+  initSH1106();
+
+  // 2. Initialize Servos (Staggered boot to avoid power drop!)
+  currentServoAngle = ARM_DOWN_ANGLE;
+  targetServoAngle  = ARM_DOWN_ANGLE;
+
   leftServo.attach(LEFT_SERVO_PIN);
   rightServo.attach(RIGHT_SERVO_PIN);
 
-  leftServo.write(ARM_DOWN_ANGLE);
-  rightServo.write(MIRROR_RIGHT_ARM ? (180 - ARM_DOWN_ANGLE) : ARM_DOWN_ANGLE);
-  delay(300);
+  int initLeft  = constrain(ARM_DOWN_ANGLE + leftOffset, 0, 180);
+  int initRight = constrain((MIRROR_RIGHT_ARM ? (180 - ARM_DOWN_ANGLE) : ARM_DOWN_ANGLE) + rightOffset, 0, 180);
+  leftServo.write(initLeft);
+  delay(150); // Let Left servo settle before powering Right servo
+  rightServo.write(initRight);
+  delay(150); // Let Right servo settle
 
-  // 2. Initialize OLED Display at 400kHz Fast Speed
-  initSH1106();
-
-  // 3. Show Batch 4 Team Intro Screen on Boot!
-  introStartTime = millis();
-  drawIntroTextScreen();
-
-  lastBlinkTime = millis();
-  targetPupilX = -6;
-
-  // 4. Initialize IR Sensor (Pin 2 = Signal, Pin 3 = Ground, Pin 4 = 5V Power)
+  // 3. Initialize IR Sensor (Pin 2 = Signal, Pin 3 = GND, Pin 4 = 5V VCC)
   pinMode(IR_GND_PIN, OUTPUT);
-  digitalWrite(IR_GND_PIN, LOW);    // Pure 0V Ground for the IR sensor!
+  digitalWrite(IR_GND_PIN, LOW);    // Pure 0V Ground for direct-plug sensor
   pinMode(IR_POWER_PIN, OUTPUT);
-  digitalWrite(IR_POWER_PIN, HIGH); // Pure 5V Power for the IR sensor!
+  digitalWrite(IR_POWER_PIN, HIGH); // Pure 5V VCC Power for direct-plug sensor
   pinMode(IR_SENSOR_PIN, INPUT_PULLUP);
+
+  // 4. Start directly in the Default Cute Animation Sequence!
+  faceStoryActive = true;
+  setStoryStep(0, millis());
+  lastBlinkTime = millis();
+  renderFastScreen();
 }
 
 void loop() {
@@ -1091,8 +1228,6 @@ void loop() {
     lastOledDraw = millis();
     if (currentFace == FACE_TEXT_INTRO) {
       drawIntroTextScreen();
-    } else if (currentFace == FACE_HAIII) {
-      drawHaiiiScreen();
     } else {
       renderFastScreen();
     }
