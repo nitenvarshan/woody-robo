@@ -68,4 +68,9 @@ Upgrade Woody from the Arduino Uno to the **30-pin ESP32 DevKit V1** for wireles
 | **Shoulder IR Sensor** | `GPIO 14` | ESP32 `3V3` (⚠️ Do NOT use 5V!) |
 | **ESP32 Power** | `VIN` | **5.0V Buck Output** + Common GND |
 
+#### 📊 Live Chip Diagnostics & Web App:
+- **Web App Dashboard (`http://192.168.4.1`):** Connect to Wi-Fi `Woody-Robot` (pass: `12345678`) to open the touch dashboard. The bottom navigation bar includes a **📊 Chip & System** page showing real-time **Core Temperature**, **RAM (Heap)** usage bar, **Uptime Running Time**, **CPU specs**, and **Flash Storage**.
+- **Bluetooth/Serial Telemetry:** Send **`SYS`** or **`DIAG`** via Bluetooth App or Serial Monitor to print a live chip telemetry status card.
+
+
 

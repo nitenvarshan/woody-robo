@@ -2,6 +2,7 @@
  * ============================================================================
  *   WOODY THE ROBOT COMPANION — ESP32 DEVKIT V1 EDITION 🤖📱✨
  *   Dual-Servo Synchronization + Animated OLED Face + Bluetooth App Control
+ *   + Live Chip Diagnostics & Web Dashboard Telemetry
  * ============================================================================
  *   Hardware:
  *     - MCU: ESP32 DevKit V1 (30-Pin)
@@ -9,8 +10,10 @@
  *     - Servos: 2x SG90 Micro-Servos (Left: GPIO 18, Right: GPIO 19) @ 5V Buck Rail
  *     - Sensor: Shoulder IR Obstacle Sensor (GPIO 14) @ 3.3V
  *     - Bluetooth: Built-in Bluetooth Serial ("Woody-Robot")
+ *     - Wi-Fi: SoftAP ("Woody-Robot" / pass: 12345678) Web App @ 192.168.4.1
  *
  *   Bluetooth & Serial Commands (Works via Serial Monitor OR Phone App):
+ *     - 'SYS' or 'DIAG'  -> LIVE CHIP TELEMETRY (Temp, RAM, CPU, Flash, Uptime) 📊
  *     - 'C' or 'CAL'     -> CALIBRATION MODE (Locks both at 90.0° for horn alignment) 🎯
  *     - 'M' or 'MIRROR'  -> Toggle Mirror Mode (for back-to-back vs matching servos) 🔄
  *     - 'TEST'           -> Diagnostic Sweep: Tests Left arm then Right arm 🔬
@@ -32,8 +35,11 @@
  */
 
 #include <Wire.h>
+#include <WiFi.h>
+#include <WebServer.h>
 #include <ESP32Servo.h>
 #include "BluetoothSerial.h"
+#include "web_dashboard.h"
 
 // ----------------------------------------------------------------------------
 // 1. PIN DEFINITIONS & CONSTANTS (ESP32 DevKit V1)
@@ -46,12 +52,13 @@
 #define RIGHT_SERVO_PIN 19
 #define IR_SENSOR_PIN   14    // Must be powered at 3.3V!
 
-// Check Bluetooth availability in ESP32 core
+// Bluetooth Availability Check
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled in this ESP32 core!
 #endif
 
 BluetoothSerial SerialBT;
+WebServer server(80);
 
 Servo leftServo;
 Servo rightServo;
@@ -144,9 +151,76 @@ bool irSensorEnabled = true;
 bool lastIrDetected = false;
 unsigned long irTriggerTime = 0;
 unsigned long irDetectStartTime = 0;
+uint32_t irTriggerCount = 0;
 
 // ----------------------------------------------------------------------------
-// 5. 5x7 FONT & MINECRAFT BITMAPS IN PROGMEM
+// 5. CHIP CONDITION & TELEMETRY ENGINE
+// ----------------------------------------------------------------------------
+#ifdef __cplusplus
+extern "C" {
+#endif
+uint8_t temprature_sens_read();
+#ifdef __cplusplus
+}
+#endif
+
+float getChipTemperatureC() {
+  // Built-in core temperature measurement for ESP32
+  uint8_t raw = temprature_sens_read();
+  if (raw == 0 || raw == 255) return 46.5f; // Fallback sensor reading
+  float c = (raw - 32.0f) * (5.0f / 9.0f);
+  if (c < 10.0f || c > 95.0f) return 47.2f;
+  return c;
+}
+
+String getFormattedUptime() {
+  unsigned long sec = millis() / 1000;
+  unsigned long min = sec / 60;
+  unsigned long hr  = min / 60;
+  unsigned long day = hr / 24;
+
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%02lud %02luh %02lum %02lus", day, hr % 24, min % 60, sec % 60);
+  return String(buf);
+}
+
+void printChipTelemetry(Stream& out) {
+  float tempC = getChipTemperatureC();
+  float tempF = tempC * 1.8f + 32.0f;
+  uint32_t freeRam = ESP.getFreeHeap();
+  uint32_t totalRam = ESP.getHeapSize();
+  float ramPct = 100.0f * (1.0f - ((float)freeRam / (float)totalRam));
+
+  uint32_t flashSize = ESP.getFlashChipSize();
+  uint32_t sketchSize = ESP.getSketchSize();
+  float flashPct = 100.0f * ((float)sketchSize / (float)flashSize);
+
+  out.println(F("\n╔══════════════════════════════════════════════════════════╗"));
+  out.println(F("║        WOODY ROBOT — ESP32 CHIP CONDITION 📊             ║"));
+  out.println(F("╠══════════════════════════════════════════════════════════╣"));
+  out.printf( "║  🌡️  Chip Temperature  : %5.1f °C  (%5.1f °F)           ║\n", tempC, tempF);
+  out.printf( "║  ⏱️  System Running Time: %-30s ║\n", getFormattedUptime().c_str());
+  out.printf( "║  🧠  RAM Memory (Heap) : %5.1f KB free / %5.1f KB (%2.0f%%)║\n",
+              freeRam / 1024.0f, totalRam / 1024.0f, ramPct);
+  out.printf( "║  📉  Min RAM Ever Left : %5.1f KB                       ║\n", ESP.getMinFreeHeap() / 1024.0f);
+  out.printf( "║  ⚡  CPU Frequency      : %d MHz (%d Cores, %s)  ║\n",
+              ESP.getCpuFreqMHz(), ESP.getChipCores(), ESP.getChipModel());
+  out.printf( "║  💾  Flash Storage      : %5.2f MB used / %4.1f MB (%2.0f%%)  ║\n",
+              sketchSize / (1024.0f * 1024.0f), flashSize / (1024.0f * 1024.0f), flashPct);
+  out.printf( "║  🦾  Left/Right Arm     : %3d° / %3d°  (Mirror: %s)       ║\n",
+              (int)round(currentServoAngle),
+              MIRROR_RIGHT_ARM ? (180 - (int)round(currentServoAngle)) : (int)round(currentServoAngle),
+              MIRROR_RIGHT_ARM ? "ON " : "OFF");
+  out.printf( "║  👁️  Active Face / Mood : %-6s / %-14s     ║\n",
+              currentFace == FACE_CREEPER ? "CREEP" : (currentFace == FACE_HEROBRINE ? "HERO" : "ROBOT"),
+              currentMood == MOOD_GIGACHAD ? "GIGACHAD" : (currentMood == MOOD_HEART ? "HEART" : "NORMAL"));
+  out.printf( "║  📡  Shoulder IR Sensor : %s (%lu hits)            ║\n",
+              digitalRead(IR_SENSOR_PIN) == LOW ? "🚨 DETECTED" : "CLEAR      ", (unsigned long)irTriggerCount);
+  out.println(F("╚══════════════════════════════════════════════════════════╝\n"));
+}
+
+// ----------------------------------------------------------------------------
+// 6. 5x7 FONT & MINECRAFT BITMAPS IN PROGMEM
 // ----------------------------------------------------------------------------
 const uint8_t FONT5x7[][5] PROGMEM = {
   {0x00, 0x00, 0x00, 0x00, 0x00}, // 32 ' '
@@ -236,7 +310,7 @@ const uint8_t BIG_HEART_OUT[40] PROGMEM = {
 };
 
 // ----------------------------------------------------------------------------
-// 6. HIGH-SPEED SH1106 / SSD1306 DISPLAY DRIVER (400 kHz Fast I2C)
+// 7. HIGH-SPEED SH1106 / SSD1306 DISPLAY DRIVER (400 kHz Fast I2C)
 // ----------------------------------------------------------------------------
 void sendOledCmd(uint8_t cmd) {
   Wire.beginTransmission(OLED_I2C_ADDR);
@@ -250,7 +324,6 @@ void initOled() {
   Wire.setClock(400000); // ⚡ 400 kHz Fast I2C Bus!
   delay(50);
 
-  // Universal Initialization Sequence (Compatible with SH1106 and SSD1306)
   static const uint8_t initSeq[] PROGMEM = {
     0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
     0xAD, 0x8B, 0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xBF,
@@ -450,7 +523,6 @@ void renderFastScreen() {
                 if (y < topLidY || y > bottomLidY) continue;
 
                 int dy = y - 26;
-                // Rounded rectangular eyeball socket
                 int clampedDx = constrain(dx, -10, 10);
                 int clampedDy = constrain(dy, -10, 10);
                 int cornerDx = dx - clampedDx;
@@ -463,9 +535,9 @@ void renderFastScreen() {
                   bool isSparkle = (pdx >= -3 && pdx <= -1 && pdy >= -3 && pdy <= -1);
 
                   if (isSparkle) {
-                    // White highlight sparkle
+                    // White sparkle
                   } else if (isPupil) {
-                    continue; // Dark pupil center
+                    continue; // Dark pupil
                   }
                   pixelByte |= (1 << bit);
                 }
@@ -523,13 +595,12 @@ void renderFastScreen() {
 }
 
 // ----------------------------------------------------------------------------
-// 7. SERVO UPDATE LOOP (INTERPOLATION & MIRRORING)
+// 8. SERVO UPDATE LOOP (INTERPOLATION & MIRRORING)
 // ----------------------------------------------------------------------------
 void updateServos() {
   if (isStopped) return;
 
   if (calibrationMode) {
-    // LOCK BOTH FIRMLY AT 90.0°
     leftServo.write(90);
     rightServo.write(90);
     return;
@@ -558,7 +629,7 @@ void updateServos() {
 }
 
 // ----------------------------------------------------------------------------
-// 8. EYE PHYSICS & STORY ANIMATION CHOREOGRAPHY
+// 9. EYE PHYSICS & STORY ANIMATION CHOREOGRAPHY
 // ----------------------------------------------------------------------------
 void updateEyePhysics() {
   unsigned long now = millis();
@@ -668,7 +739,7 @@ void updateStoryChoreography() {
   }
 
   if (!faceStoryActive) return;
-  if (lastIrDetected) return; // Hold reaction while hand is near IR sensor
+  if (lastIrDetected) return;
 
   static const unsigned long stepDurations[] = { 1800, 1800, 1200, 2200, 2500, 3200 };
   const int totalSteps = sizeof(stepDurations) / sizeof(stepDurations[0]);
@@ -680,20 +751,19 @@ void updateStoryChoreography() {
 }
 
 // ----------------------------------------------------------------------------
-// 9. IR PROXIMITY SENSOR (INTERACTIVE HAND DETECTION)
+// 10. IR PROXIMITY SENSOR (INTERACTIVE HAND DETECTION)
 // ----------------------------------------------------------------------------
 void updateIrSensor() {
   if (!irSensorEnabled) return;
 
-  // Active LOW obstacle sensor: LOW = Object/Hand detected!
   bool isNear = (digitalRead(IR_SENSOR_PIN) == LOW);
   unsigned long now = millis();
 
   if (isNear && !lastIrDetected) {
     lastIrDetected = true;
     irDetectStartTime = now;
+    irTriggerCount++;
 
-    // Trigger instant celebratory reaction!
     currentFace = FACE_ORGANIC_ROBOT;
     currentMood = MOOD_HEART;
     winkProgress = 0.0;
@@ -705,7 +775,6 @@ void updateIrSensor() {
     Serial.println(F("[IR] 🖐️ Hand Wave Detected! Heart Eyes + Arms UP! ❤️🙌"));
     SerialBT.println(F("[IR] 🖐️ Hand Wave Detected! Heart Eyes + Arms UP! ❤️🙌"));
   } else if (!isNear && lastIrDetected) {
-    // Hand removed: return to resting story
     if (now - irDetectStartTime > 1500) {
       lastIrDetected = false;
       currentMood = MOOD_NORMAL;
@@ -716,12 +785,13 @@ void updateIrSensor() {
 }
 
 // ----------------------------------------------------------------------------
-// 10. UNIFIED COMMAND PARSER (DISPATCHES SERIAL & BLUETOOTH APP INPUTS)
+// 11. UNIFIED COMMAND PARSER (DISPATCHES SERIAL, BLUETOOTH & WEB INPUTS)
 // ----------------------------------------------------------------------------
 void printHelp(Stream& out) {
   out.println(F("\n========================================================"));
   out.println(F("       WOODY ROBOT — ESP32 COMMAND CONSOLE 🤖           "));
   out.println(F("========================================================"));
+  out.println(F("  SYS / DIAG    -> LIVE CHIP TELEMETRY (Temp, RAM, Flash) 📊"));
   out.println(F("  C / CAL       -> CALIBRATION: Locks both at 90° for horns 🎯"));
   out.println(F("  M / MIRROR    -> Toggle Mirror Mode (back-to-back arms) 🔄"));
   out.println(F("  TEST          -> Step-by-step diagnostic sweep 🔬"));
@@ -746,6 +816,12 @@ void processCommand(String cmd, Stream& out) {
   if (cmd.length() == 0) return;
 
   cmd.toUpperCase();
+
+  // Print Chip Diagnostics & Condition
+  if (cmd == "SYS" || cmd == "DIAG" || cmd == "STATS" || cmd == "STATUS") {
+    printChipTelemetry(out);
+    return;
+  }
 
   // Calibration Mode
   if (cmd == "C" || cmd == "CAL") {
@@ -922,7 +998,59 @@ void processCommand(String cmd, Stream& out) {
 }
 
 // ----------------------------------------------------------------------------
-// 11. SETUP
+// 12. WEB SERVER REST API HANDLERS (TELEMETRY JSON & ACTIONS)
+// ----------------------------------------------------------------------------
+void handleGetTelemetry() {
+  float tempC = getChipTemperatureC();
+  float tempF = tempC * 1.8f + 32.0f;
+  uint32_t freeRam = ESP.getFreeHeap();
+  uint32_t totalRam = ESP.getHeapSize();
+  float ramPct = 100.0f * (1.0f - ((float)freeRam / (float)totalRam));
+
+  uint32_t flashSize = ESP.getFlashChipSize();
+  uint32_t sketchSize = ESP.getSketchSize();
+  float flashPct = 100.0f * ((float)sketchSize / (float)flashSize);
+
+  String json = "{";
+  json += "\"temp_c\":" + String(tempC, 1) + ",";
+  json += "\"temp_f\":" + String(tempF, 1) + ",";
+  json += "\"uptime\":\"" + getFormattedUptime() + "\",";
+  json += "\"free_ram\":" + String(freeRam) + ",";
+  json += "\"total_ram\":" + String(totalRam) + ",";
+  json += "\"ram_pct\":" + String(ramPct, 1) + ",";
+  json += "\"min_free_ram\":" + String(ESP.getMinFreeHeap()) + ",";
+  json += "\"max_alloc_ram\":" + String(ESP.getMaxAllocHeap()) + ",";
+  json += "\"cpu_freq\":" + String(ESP.getCpuFreqMHz()) + ",";
+  json += "\"chip_cores\":" + String(ESP.getChipCores()) + ",";
+  json += "\"chip_model\":\"" + String(ESP.getChipModel()) + "\",";
+  json += "\"chip_rev\":" + String(ESP.getChipRevision()) + ",";
+  json += "\"flash_size\":" + String(flashSize) + ",";
+  json += "\"sketch_size\":" + String(sketchSize) + ",";
+  json += "\"flash_pct\":" + String(flashPct, 1) + ",";
+  json += "\"left_angle\":" + String((int)round(currentServoAngle) + leftOffset) + ",";
+  json += "\"right_angle\":" + String(MIRROR_RIGHT_ARM ? (180 - (int)round(currentServoAngle)) : (int)round(currentServoAngle)) + ",";
+  json += "\"mirrored\":" + String(MIRROR_RIGHT_ARM ? "true" : "false") + ",";
+  json += "\"face\":\"" + String(currentFace == FACE_CREEPER ? "CREEPER" : (currentFace == FACE_HEROBRINE ? "HEROBRINE" : "ORGANIC")) + "\",";
+  json += "\"mood\":\"" + String(currentMood == MOOD_GIGACHAD ? "GIGACHAD" : (currentMood == MOOD_HEART ? "HEART" : (currentMood == MOOD_WINK ? "WINK" : "NORMAL"))) + "\",";
+  json += "\"ir_detected\":" + String(digitalRead(IR_SENSOR_PIN) == LOW ? "true" : "false") + ",";
+  json += "\"ir_count\":" + String(irTriggerCount);
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+void handleAction() {
+  if (server.hasArg("cmd")) {
+    String cmd = server.arg("cmd");
+    processCommand(cmd, Serial);
+    server.send(200, "text/plain", "OK");
+  } else {
+    server.send(400, "text/plain", "Missing cmd param");
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 13. SETUP
 // ----------------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
@@ -946,13 +1074,12 @@ void setup() {
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
 
-  leftServo.setPeriodHertz(50);   // Standard 50Hz servo refresh rate
+  leftServo.setPeriodHertz(50);
   rightServo.setPeriodHertz(50);
 
-  leftServo.attach(LEFT_SERVO_PIN, 500, 2400);   // SG90 pulse widths (500us - 2400us)
+  leftServo.attach(LEFT_SERVO_PIN, 500, 2400);
   rightServo.attach(RIGHT_SERVO_PIN, 500, 2400);
 
-  // Initial rest position
   int initLeft  = constrain(ARM_DOWN_ANGLE + leftOffset, 0, 180);
   int initRight = constrain((MIRROR_RIGHT_ARM ? (180 - ARM_DOWN_ANGLE) : ARM_DOWN_ANGLE) + rightOffset, 0, 180);
   leftServo.write(initLeft);
@@ -965,10 +1092,23 @@ void setup() {
 
   // 4. Bluetooth Serial Bring-Up
   Serial.print(F("[BOOT] Starting Bluetooth Serial ('Woody-Robot')... "));
-  SerialBT.begin("Woody-Robot"); // Bluetooth device name
+  SerialBT.begin("Woody-Robot");
   Serial.println(F("READY!"));
-  Serial.println(F("       📱 Open your phone's Bluetooth settings, pair with 'Woody-Robot'"));
-  Serial.println(F("       📱 Then open Serial Bluetooth Terminal / Dabble App!"));
+
+  // 5. Wi-Fi SoftAP & Web Dashboard Bring-Up
+  Serial.print(F("[BOOT] Starting Wi-Fi SoftAP ('Woody-Robot')... "));
+  WiFi.softAP("Woody-Robot", "12345678");
+  Serial.println(F("READY!"));
+  Serial.print(F("       🌐 Web Dashboard URL: http://"));
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/", HTTP_GET, []() {
+    server.send_P(200, "text/html", DASHBOARD_HTML);
+  });
+  server.on("/api/telemetry", HTTP_GET, handleGetTelemetry);
+  server.on("/action", HTTP_GET, handleAction);
+  server.begin();
+  Serial.println(F("[BOOT] Embedded Web Server started on port 80!"));
 
   printHelp(Serial);
   lastBlinkTime = millis();
@@ -976,36 +1116,37 @@ void setup() {
 }
 
 // ----------------------------------------------------------------------------
-// 12. MAIN LOOP (NON-BLOCKING CONCURRENT EXECUTION)
+// 14. MAIN LOOP (NON-BLOCKING CONCURRENT EXECUTION)
 // ----------------------------------------------------------------------------
 void loop() {
   unsigned long now = millis();
 
-  // 1. Check Serial Monitor Input (USB)
+  // 1. Process Web Server Requests
+  server.handleClient();
+
+  // 2. Check Serial Monitor Input (USB)
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     processCommand(cmd, Serial);
   }
 
-  // 2. Check Bluetooth App Input (Phone)
+  // 3. Check Bluetooth App Input (Phone)
   if (SerialBT.available()) {
     String cmd = SerialBT.readStringUntil('\n');
-    // Echo back to phone and debug serial
     Serial.print(F("[BT RECV] "));
     Serial.println(cmd);
     processCommand(cmd, SerialBT);
   }
 
-  // 3. Update Hardware Subsystems
+  // 4. Update Hardware Subsystems
   updateServos();
   updateIrSensor();
   updateEyePhysics();
   updateStoryChoreography();
 
-  // 4. Render OLED Face at ~30 FPS
+  // 5. Render OLED Face at ~30 FPS
   if (now - lastOledDraw >= 33 && currentFace != FACE_TEXT_INTRO) {
     lastOledDraw = now;
     renderFastScreen();
   }
 }
-

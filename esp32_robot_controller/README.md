@@ -124,3 +124,30 @@ Now you can control Woody with instant, tactile one-tap buttons right from your 
    - **Upload Speed**: `921600` (or `115200`).
    - Click **Upload (➡️)**!
 
+---
+
+## 📊 6. Live Chip Condition, Telemetry & Web App
+
+You can analyze the ESP32's hardware health, temperature, RAM, flash storage, and running time using either the **Web App** or the **Bluetooth App**:
+
+### A. Web App Dashboard (With Bottom Tab Bar)
+1. On your phone, connect to Woody's Wi-Fi network:
+   - **Wi-Fi SSID:** `Woody-Robot`
+   - **Password:** `12345678`
+2. Open any browser (Chrome, Safari) and go to:
+   👉 **`http://192.168.4.1`**
+3. Tap the **📊 Chip & System** button on the bottom navigation bar to see:
+   - 🌡️ **Core Chip Temperature:** Real-time °C and °F readout with health color badge (Green = Normal, Orange = Warm, Red = Hot).
+   - ⏱️ **Running Time (Uptime):** Total time since boot (`DDd HHh MMm SSs`).
+   - 🧠 **RAM (Heap) Memory:** Free vs Total RAM with live visual percentage bar and minimum heap watermark.
+   - ⚡ **Processor Specs:** CPU frequency (240 MHz), Core count, and Silicon Model/Revision.
+   - 💾 **Flash Storage:** Sketch usage vs Total Flash chip size.
+   - 🦾 **Servo Coordinates & Mirror Status:** Live left and right arm angles.
+   - 📡 **IR Sensor Status:** Live obstacle state and trigger counter.
+
+### B. Bluetooth / Serial Console Command
+In **Serial Bluetooth Terminal** or the Arduino Serial Monitor, type:
+- **`SYS`** or **`DIAG`** (or **`STATUS`**)
+Prints a clean, formatted ASCII telemetry card with all real-time chip metrics!
+
+
